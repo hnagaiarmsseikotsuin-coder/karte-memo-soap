@@ -1,0 +1,1456 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>既存患者 SOAPカルテメモ</title>
+  <style>
+    :root {
+      --bg: #f2f5f7;
+      --panel: #ffffff;
+      --line: #c8d2dc;
+      --text: #18232f;
+      --muted: #647484;
+      --primary: #1467a8;
+      --primary-dark: #0c4774;
+      --selected: #e3f2fd;
+      --done: #e6f5ec;
+      --done-line: #39935a;
+      --danger: #b42318;
+      --s-bg: #eef8f4;
+      --s-line: #47a87f;
+      --o-bg: #f2f4fb;
+      --o-line: #5e75bd;
+      --p-bg: #fff6e8;
+      --p-line: #d89028;
+      --a-bg: #f7f2fb;
+      --a-line: #8b63b4;
+      --shadow: 0 2px 8px rgba(31, 45, 61, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 760px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 10px;
+      width: clamp(760px, 67vw, 1040px);
+      max-width: calc(100vw - 20px);
+      height: 100vh;
+      padding: 10px;
+    }
+
+    .schedule,
+    .workspace {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .schedule {
+      width: 100%;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      background: #394958;
+      color: #fff;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .date-label {
+      font-size: 13px;
+      font-weight: 700;
+      opacity: 0.9;
+    }
+
+    .practitioners {
+      display: flex;
+      gap: 8px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--line);
+      background: #f7f9fb;
+    }
+
+    .practitioner {
+      min-width: 120px;
+      min-height: 42px;
+      border: 1px solid #9ba9b5;
+      border-radius: 6px;
+      background: #fff;
+      color: #263440;
+      cursor: pointer;
+      font-weight: 800;
+    }
+
+    .practitioner.active {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 4px;
+      max-width: none;
+      padding: 6px 8px 7px;
+      overflow-x: auto;
+    }
+
+    .time-row {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 4px;
+      align-items: start;
+    }
+
+    .time-label {
+      min-height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      background: #eef2f5;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .slots {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 3px;
+    }
+
+    .slot {
+      flex: 0 0 44px;
+      min-height: 32px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      cursor: pointer;
+      padding: 2px 3px;
+      text-align: center;
+    }
+
+    .slot.selected {
+      border-color: var(--primary);
+      background: var(--selected);
+      box-shadow: inset 0 0 0 2px var(--primary);
+    }
+
+    .slot.done {
+      border-color: #9ca3af;
+      background: #d7dce1;
+      color: #697480;
+    }
+
+    .slot.done.selected {
+      border-color: var(--primary);
+      background: linear-gradient(180deg, var(--selected), #d7dce1);
+      color: var(--text);
+    }
+
+    .slot-time {
+      display: block;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.1;
+    }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 1fr;
+    }
+
+    .status {
+      min-height: 22px;
+      color: var(--primary-dark);
+      font-weight: 800;
+      text-align: right;
+      margin-bottom: 8px;
+    }
+
+    .workspace-body {
+      min-height: 0;
+      overflow: auto;
+      padding: 8px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .input-grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .panel {
+      border: 2px solid var(--line);
+      background: #fff;
+      padding: 10px;
+    }
+
+    .panel.s-panel {
+      border-color: var(--s-line);
+      background: var(--s-bg);
+    }
+
+    .panel.o-panel {
+      border-color: var(--o-line);
+      background: var(--o-bg);
+    }
+
+    .panel.p-panel {
+      border-color: var(--p-line);
+      background: var(--p-bg);
+    }
+
+    .panel.a-panel {
+      border-color: var(--a-line);
+      background: var(--a-bg);
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 0 0 8px;
+      font-size: 18px;
+      font-weight: 900;
+    }
+
+    .role-note {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .fields {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+    }
+
+    .field.full {
+      grid-column: 1 / -1;
+    }
+
+    label {
+      display: block;
+      margin: 0 0 4px;
+      font-weight: 800;
+      color: #263440;
+    }
+
+    input,
+    textarea,
+    select {
+      width: 100%;
+      border: 1px solid #98a8b6;
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      min-height: 42px;
+      padding: 8px 10px;
+    }
+
+    textarea {
+      min-height: 76px;
+      resize: vertical;
+      line-height: 1.55;
+    }
+
+    .choice-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-bottom: 7px;
+    }
+
+    .choice {
+      min-height: 42px;
+      min-width: 86px;
+      border: 1px solid #8fa1b2;
+      border-radius: 6px;
+      background: #fff;
+      color: #24313d;
+      cursor: pointer;
+      padding: 7px 10px;
+      font-weight: 800;
+    }
+
+    .choice.active {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #fff;
+      box-shadow: inset 0 0 0 1px var(--primary-dark);
+    }
+
+    .part-detail {
+      display: grid;
+      gap: 7px;
+      margin: 2px 0 8px;
+      padding: 8px;
+      border: 1px solid #b9c7d4;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .part-detail.hidden {
+      display: none;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .part-detail-row {
+      display: grid;
+      grid-template-columns: 90px 1fr;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .part-detail-label {
+      font-size: 13px;
+      font-weight: 800;
+      color: #384858;
+    }
+
+    .pelvic-display {
+      min-height: 42px;
+      width: 100%;
+      border: 1px solid #98a8b6;
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      cursor: pointer;
+      padding: 8px 10px;
+      text-align: left;
+      font-weight: 800;
+    }
+
+    .pelvic-display.active {
+      border-color: var(--primary);
+      background: var(--selected);
+      box-shadow: inset 0 0 0 2px var(--primary);
+    }
+
+    .number-pad {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .number-pad button {
+      min-height: 44px;
+      border: 1px solid #8fa1b2;
+      border-radius: 6px;
+      background: #fff;
+      color: #24313d;
+      cursor: pointer;
+      font-weight: 900;
+    }
+
+    .memo {
+      min-height: 48px;
+    }
+
+    .findings {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+
+    .finding {
+      display: grid;
+      grid-template-columns: 170px 1fr;
+      gap: 6px;
+      align-items: center;
+      padding: 6px;
+      border: 1px solid #b8c4d3;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .finding label {
+      margin: 0;
+      font-size: 14px;
+    }
+
+    .finding select {
+      min-height: 38px;
+      padding: 5px 7px;
+    }
+
+    .finding input {
+      grid-column: 2;
+      min-height: 38px;
+      padding: 5px 7px;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .btn {
+      min-height: 48px;
+      border: 1px solid var(--primary-dark);
+      border-radius: 6px;
+      background: var(--primary);
+      color: #fff;
+      cursor: pointer;
+      font-weight: 900;
+    }
+
+    .btn.secondary {
+      border-color: #7f8d9b;
+      background: #fff;
+      color: #263440;
+    }
+
+    .btn.danger {
+      border-color: var(--danger);
+      background: var(--danger);
+      color: #fff;
+    }
+
+    .output {
+      min-height: 180px;
+      font-family: "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+      line-height: 1.65;
+      white-space: pre-wrap;
+    }
+
+    .counter {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: right;
+    }
+
+    @media (max-width: 1100px) {
+      body {
+        min-width: 760px;
+      }
+
+      .app {
+        width: 100%;
+        max-width: none;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .output {
+        min-height: 260px;
+      }
+    }
+
+    @media (max-height: 720px) {
+      .slot {
+        min-height: 30px;
+      }
+
+      .panel {
+        padding: 8px;
+      }
+
+      textarea {
+        min-height: 62px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="schedule" aria-label="予約枠エリア">
+      <div class="topbar">
+        <h1 class="title">既存患者 SOAPカルテメモ</h1>
+        <div id="todayLabel" class="date-label"></div>
+      </div>
+      <div id="practitioners" class="practitioners" aria-label="施術者切り替え"></div>
+      <div id="timeline" class="timeline" aria-label="15分予約枠"></div>
+    </section>
+
+    <section class="workspace" aria-label="SOAP入力エリア">
+      <div class="workspace-body">
+        <div class="grid">
+          <aside class="panel a-panel" aria-label="SOAP文章生成エリア">
+            <h2 class="panel-title">
+              <span>SOAP文章生成</span>
+              <span class="role-note">AはS/Oから短く生成</span>
+            </h2>
+            <div id="status" class="status" aria-live="polite"></div>
+            <div class="actions">
+              <button id="generateBtn" class="btn" type="button">SOAP生成</button>
+              <button id="copyBtn" class="btn secondary" type="button">コピー</button>
+              <button id="clearSlotBtn" class="btn secondary" type="button">選択枠をクリア</button>
+              <button id="clearAllBtn" class="btn danger" type="button">全枠クリア</button>
+            </div>
+            <label for="soapOutput">生成文</label>
+            <textarea id="soapOutput" class="output" placeholder="SOAP生成ボタンで文章を作成します"></textarea>
+            <div id="counter" class="counter">0字</div>
+          </aside>
+
+          <div class="input-grid">
+            <section class="panel s-panel" aria-label="S 患者申告メモ">
+              <h2 class="panel-title">
+                <span>S：患者申告メモ</span>
+                <span class="role-note">受付スタッフ入力：患者申告のみ</span>
+              </h2>
+              <div class="fields">
+                <div class="field full">
+                  <label>前回からの変化</label>
+                  <div id="sChangeChoices" class="choice-group"></div>
+                </div>
+                <div class="field full">
+                  <label>本日気になる部位</label>
+                  <div id="sPartChoices" class="choice-group"></div>
+                  <div id="sPartDetailChoices" class="part-detail hidden"></div>
+                </div>
+                <div class="field full">
+                  <label>本日の状態</label>
+                  <div id="sConditionChoices" class="choice-group"></div>
+                </div>
+                <div class="field full">
+                  <label>本日の希望</label>
+                  <div id="sRequestChoices" class="choice-group"></div>
+                </div>
+                <div class="field full">
+                  <label for="sMemo">その他メモ</label>
+                  <textarea id="sMemo" class="memo" placeholder="生活上の出来事…例）先週、家族と旅行 / 週末に買い物で歩いた / 仕事が忙しかった"></textarea>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel p-panel" aria-label="追加施術 予定メニュー">
+              <h2 class="panel-title">
+                <span>追加施術・予定メニュー</span>
+                <span class="role-note">選択内容はPへ反映</span>
+              </h2>
+              <div id="additionalTreatmentChoices" class="choice-group"></div>
+              <div id="additionalTreatmentDetails" class="part-detail hidden">
+                <div id="moreDetail" class="field full hidden">
+                  <label>MORE回数</label>
+                  <div id="moreCountChoices" class="choice-group"></div>
+                </div>
+                <div id="pelvicDetail" class="field full hidden">
+                  <label>骨盤チェック</label>
+                  <div class="fields">
+                    <div class="field">
+                      <label>前回値</label>
+                      <button id="pelvicPrev" class="pelvic-display active" type="button"></button>
+                    </div>
+                    <div class="field">
+                      <label>今回値</label>
+                      <button id="pelvicCurrent" class="pelvic-display" type="button"></button>
+                    </div>
+                  </div>
+                  <div id="pelvicNumberPad" class="number-pad"></div>
+                </div>
+                <div id="emsDetail" class="field full hidden">
+                  <label>EMS詳細</label>
+                  <div id="emsModeChoices" class="choice-group"></div>
+                  <label for="emsCurrent">電流の量</label>
+                  <select id="emsCurrent"></select>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel o-panel" aria-label="O 施術者確認所見">
+              <h2 class="panel-title">
+                <span>O：施術者確認所見</span>
+                <span class="role-note">施術者入力：客観的所見のみ</span>
+              </h2>
+              <div id="findings" class="findings"></div>
+            </section>
+
+            <section class="panel p-panel" aria-label="P 実施内容 次回方針">
+              <h2 class="panel-title">
+                <span>P：実施内容・次回方針</span>
+                <span class="role-note">施術者入力：実施内容と方針</span>
+              </h2>
+              <div class="fields">
+                <div class="field full">
+                  <label>本日行った施術</label>
+                  <div id="pTreatmentChoices" class="choice-group"></div>
+                  <textarea id="pTreatmentMemo" class="memo" placeholder="その他メモ"></textarea>
+                </div>
+                <div class="field full">
+                  <label>指導内容</label>
+                  <div id="pGuidanceChoices" class="choice-group"></div>
+                  <textarea id="pGuidanceMemo" class="memo" placeholder="その他メモ"></textarea>
+                </div>
+                <div class="field full">
+                  <label>次回確認事項</label>
+                  <div id="pNextChoices" class="choice-group"></div>
+                  <textarea id="pNextMemo" class="memo" placeholder="その他メモ"></textarea>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const storageKey = "karteMemoSoap.v1";
+    const practitioners = [
+      { id: "p1", name: "施術者1" },
+      { id: "p2", name: "施術者2" },
+      { id: "p3", name: "施術者3" }
+    ];
+    const choiceGroups = {
+      sChange: { container: "sChangeChoices", values: ["前回と同じ", "良い", "少し良い", "変化なし", "少し悪い", "悪い", "別部位あり"], multiple: false },
+      sPart: { container: "sPartChoices", values: ["前回と同じ", "首", "肩", "背中", "腰", "股関節", "膝", "足首", "肘", "手首", "ふくらはぎ", "足裏", "指", "その他"], multiple: true },
+      sCondition: { container: "sConditionChoices", values: ["前回と同じ", "痛い", "重い", "張る", "だるい", "違和感", "しびれ", "動かしにくい", "その他"], multiple: true },
+      sRequest: { container: "sRequestChoices", values: ["いつも通り", "重点確認", "軽め", "強め", "相談あり", "その他"], multiple: true },
+      additionalTreatments: { container: "additionalTreatmentChoices", values: ["MORE", "足リンパ", "骨盤", "ハイボル", "EMS", "小顔", "テーピング"], multiple: true },
+      moreCount: { container: "moreCountChoices", values: ["1回", "2回", "3回"], multiple: false },
+      emsMode: { container: "emsModeChoices", values: ["A：干渉波＋変調波 4K40 8K40", "B：干渉波＋変調波 F-1 F-2", "C：パルス波 4K40 8K40", "D：パルス波 F-5 F-6"], multiple: false },
+      pTreatment: { container: "pTreatmentChoices", values: ["手技", "ストレッチ", "関節調整", "テーピング", "確認のみ", "その他"], multiple: true },
+      pGuidance: { container: "pGuidanceChoices", values: ["姿勢", "歩行", "座位", "睡眠", "運動", "ストレッチ", "負担動作注意", "なし", "その他"], multiple: true },
+      pNext: { container: "pNextChoices", values: ["同部位の変化", "症状レベル", "可動域", "負担動作", "施術反応", "通常通り", "その他"], multiple: true }
+    };
+    const partSides = ["右", "左", "両方"];
+    const fingers = ["親指", "人差し指", "中指", "薬指", "小指"];
+    const findings = ["圧痛", "運動痛", "自発痛", "炎症所見（熱感・発赤）", "骨折の疑い（異常可動性・軋轢音・転移・変形）", "脱臼の疑い（弾発性固定・関節部の変形・関節窩の空虚）"];
+    const findingLevels = ["なし", "軽度", "中等度", "強度"];
+    const findingNoteLabels = {
+      "圧痛": "部位",
+      "自発痛": "部位",
+      "炎症所見（熱感・発赤）": "部位",
+      "運動痛": "関節・方向・角度"
+    };
+    const todayKey = new Date().toLocaleDateString("sv-SE");
+    const state = loadState();
+    let selectedPractitioner = "p1";
+    let selectedTime = "09:00";
+    let messageTimer = null;
+    let pelvicInputTarget = "prev";
+
+    const fields = {
+      sMemo: document.getElementById("sMemo"),
+      pelvicPrev: document.getElementById("pelvicPrev"),
+      pelvicCurrent: document.getElementById("pelvicCurrent"),
+      emsCurrent: document.getElementById("emsCurrent"),
+      pTreatmentMemo: document.getElementById("pTreatmentMemo"),
+      pGuidanceMemo: document.getElementById("pGuidanceMemo"),
+      pNextMemo: document.getElementById("pNextMemo"),
+      soapOutput: document.getElementById("soapOutput")
+    };
+
+    function blankSlot() {
+      const observation = {};
+      findings.forEach((name) => {
+        observation[name] = "なし";
+      });
+      return {
+        s: {
+          part: [],
+          partDetails: {},
+          fingers: [],
+          condition: [],
+          change: "",
+          request: [],
+          memo: ""
+        },
+        additionalTreatments: [],
+        additionalDetails: {
+          moreCount: "",
+          pelvicPrev: "",
+          pelvicCurrent: "",
+          emsMode: "",
+          emsCurrent: ""
+        },
+        o: observation,
+        oNotes: {},
+        p: {
+          treatment: [],
+          treatmentMemo: "",
+          electric: [],
+          electricMemo: "",
+          guidance: [],
+          guidanceMemo: "",
+          next: [],
+          nextMemo: ""
+        },
+        output: ""
+      };
+    }
+
+    function createTimes() {
+      const times = [];
+      for (let minutes = 9 * 60; minutes <= 21 * 60; minutes += 15) {
+        const hour = String(Math.floor(minutes / 60)).padStart(2, "0");
+        const minute = String(minutes % 60).padStart(2, "0");
+        times.push(`${hour}:${minute}`);
+      }
+      return times;
+    }
+
+    function timeGroups() {
+      const groups = [
+        { label: "朝", start: "09:00", end: "12:45", times: [] },
+        { label: "昼", start: "13:00", end: "16:45", times: [] },
+        { label: "晩", start: "17:00", end: "21:00", times: [] }
+      ];
+      createTimes().forEach((time) => {
+        const group = groups.find((item) => time >= item.start && time <= item.end);
+        if (group) group.times.push(time);
+      });
+      return groups;
+    }
+
+    function loadState() {
+      try {
+        const saved = localStorage.getItem(storageKey);
+        return saved ? JSON.parse(saved) : {};
+      } catch (error) {
+        return {};
+      }
+    }
+
+    function persistState() {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+    }
+
+    function ensureSlot(practitionerId, time) {
+      if (!state[todayKey]) state[todayKey] = {};
+      if (!state[todayKey][practitionerId]) state[todayKey][practitionerId] = {};
+      if (!state[todayKey][practitionerId][time]) state[todayKey][practitionerId][time] = blankSlot();
+      const slot = state[todayKey][practitionerId][time];
+      if (!slot.s) slot.s = blankSlot().s;
+      if (!slot.o) slot.o = blankSlot().o;
+      if (!slot.oNotes || typeof slot.oNotes !== "object" || Array.isArray(slot.oNotes)) slot.oNotes = {};
+      if (!slot.p) slot.p = blankSlot().p;
+      if (!slot.additionalDetails) slot.additionalDetails = blankSlot().additionalDetails;
+      normalizeSlot(slot);
+      findings.forEach((name) => {
+        if (!slot.o[name] || slot.o[name] === "強い") slot.o[name] = slot.o[name] === "強い" ? "強度" : "なし";
+        if (findingNoteLabels[name] && typeof slot.oNotes[name] !== "string") slot.oNotes[name] = "";
+      });
+      if (typeof slot.output !== "string") slot.output = "";
+      return slot;
+    }
+
+    function normalizeSlot(slot) {
+      normalizeMulti(slot.s, "part");
+      if (!slot.s.partDetails || typeof slot.s.partDetails !== "object" || Array.isArray(slot.s.partDetails)) slot.s.partDetails = {};
+      if (!Array.isArray(slot.s.fingers)) slot.s.fingers = [];
+      normalizeMulti(slot.s, "condition");
+      normalizeSingle(slot.s, "change");
+      normalizeMulti(slot.s, "request");
+      normalizeSimpleMemo(slot.s);
+      normalizeMulti(slot, "additionalTreatments");
+      normalizeSingle(slot.additionalDetails, "moreCount");
+      normalizeSingle(slot.additionalDetails, "pelvicPrev");
+      normalizeSingle(slot.additionalDetails, "pelvicCurrent");
+      normalizeSingle(slot.additionalDetails, "emsMode");
+      normalizeSingle(slot.additionalDetails, "emsCurrent");
+      normalizeMulti(slot.p, "treatment", "treatmentMemo");
+      slot.p.treatment = slot.p.treatment.filter((value) => value !== "固定");
+      normalizeMulti(slot.p, "electric", "electricMemo");
+      normalizeMulti(slot.p, "guidance", "guidanceMemo");
+      normalizeMulti(slot.p, "next", "nextMemo");
+    }
+
+    function normalizeMulti(target, key, memoKey) {
+      if (Array.isArray(target[key])) {
+        target[key] = target[key].filter(Boolean);
+      } else if (typeof target[key] === "string" && target[key].trim()) {
+        target[key] = [target[key].trim()];
+      } else {
+        target[key] = [];
+      }
+      if (memoKey && typeof target[memoKey] !== "string") target[memoKey] = "";
+    }
+
+    function normalizeSingle(target, key, memoKey) {
+      if (Array.isArray(target[key])) target[key] = target[key][0] || "";
+      if (typeof target[key] !== "string") target[key] = "";
+      if (target[key] === "未選択") target[key] = "";
+      if (memoKey && typeof target[memoKey] !== "string") target[memoKey] = "";
+    }
+
+    function normalizeSimpleMemo(subjective) {
+      if (typeof subjective.memo === "string") return;
+      const oldMemoItems = [
+        formatChoiceText(subjective.level, subjective.levelMemo || ""),
+        formatChoiceText(subjective.burden, subjective.burdenMemo || ""),
+        formatChoiceText(subjective.life, subjective.lifeMemo || ""),
+        subjective.partMemo || "",
+        subjective.conditionMemo || "",
+        subjective.changeMemo || "",
+        subjective.requestMemo || ""
+      ].filter(Boolean);
+      subjective.memo = oldMemoItems.join("。");
+    }
+
+    function isFilled(slot) {
+      return Boolean(
+        slot.s.part.length ||
+        Object.keys(slot.s.partDetails).length ||
+        slot.s.fingers.length ||
+        slot.s.condition.length ||
+        slot.s.change ||
+        slot.s.request.length ||
+        slot.s.memo.trim() ||
+        slot.additionalTreatments.length ||
+        slot.additionalDetails.moreCount ||
+        slot.additionalDetails.pelvicPrev ||
+        slot.additionalDetails.pelvicCurrent ||
+        slot.additionalDetails.emsMode ||
+        slot.additionalDetails.emsCurrent ||
+        hasActiveFindings(slot) ||
+        slot.p.treatment.length ||
+        slot.p.treatmentMemo.trim() ||
+        slot.p.guidance.length ||
+        slot.p.guidanceMemo.trim() ||
+        slot.p.next.length ||
+        slot.p.nextMemo.trim() ||
+        slot.output.trim()
+      );
+    }
+
+    function hasActiveFindings(slot) {
+      return findings.some((name) => slot.o[name] && slot.o[name] !== "なし");
+    }
+
+    function hasPlanInput(slot) {
+      return Boolean(
+        slot.p.treatment.length ||
+        slot.p.treatmentMemo.trim() ||
+        slot.p.guidance.length ||
+        slot.p.guidanceMemo.trim() ||
+        slot.p.next.length ||
+        slot.p.nextMemo.trim()
+      );
+    }
+
+    function setMessage(text) {
+      const status = document.getElementById("status");
+      status.textContent = text;
+      clearTimeout(messageTimer);
+      messageTimer = setTimeout(() => {
+        status.textContent = "";
+      }, 2400);
+    }
+
+    function renderPractitioners() {
+      const container = document.getElementById("practitioners");
+      container.innerHTML = "";
+      practitioners.forEach((item) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `practitioner${item.id === selectedPractitioner ? " active" : ""}`;
+        button.textContent = item.name;
+        button.addEventListener("click", () => selectPractitioner(item.id));
+        container.appendChild(button);
+      });
+    }
+
+    function renderTimeline() {
+      const timeline = document.getElementById("timeline");
+      timeline.innerHTML = "";
+      timeGroups().forEach((group) => {
+        const row = document.createElement("div");
+        row.className = "time-row";
+        const label = document.createElement("div");
+        label.className = "time-label";
+        label.textContent = group.label;
+        const slots = document.createElement("div");
+        slots.className = "slots";
+        group.times.forEach((time) => {
+          const slot = ensureSlot(selectedPractitioner, time);
+          const filled = isFilled(slot);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `slot${filled ? " done" : ""}${time === selectedTime ? " selected" : ""}`;
+          button.innerHTML = `<span class="slot-time">${time}</span>`;
+          button.addEventListener("click", () => selectTime(time));
+          slots.appendChild(button);
+        });
+        row.appendChild(label);
+        row.appendChild(slots);
+        timeline.appendChild(row);
+      });
+    }
+
+    function renderFindings() {
+      const container = document.getElementById("findings");
+      container.innerHTML = "";
+      findings.forEach((name) => {
+        const row = document.createElement("div");
+        row.className = "finding";
+        const label = document.createElement("label");
+        label.htmlFor = `finding-${name}`;
+        label.textContent = name;
+        const select = document.createElement("select");
+        select.id = `finding-${name}`;
+        select.dataset.finding = name;
+        findingLevels.forEach((level) => {
+          const option = document.createElement("option");
+          option.value = level;
+          option.textContent = level;
+          select.appendChild(option);
+        });
+        select.addEventListener("change", () => {
+          saveCurrentSlot();
+          renderTimeline();
+        });
+        row.appendChild(label);
+        row.appendChild(select);
+        if (findingNoteLabels[name]) {
+          const note = document.createElement("input");
+          note.type = "text";
+          note.id = `finding-note-${name}`;
+          note.dataset.findingNote = name;
+          note.placeholder = `${findingNoteLabels[name]}の記入欄`;
+          note.addEventListener("input", () => {
+            saveCurrentSlot();
+            renderTimeline();
+          });
+          row.appendChild(note);
+        }
+        container.appendChild(row);
+      });
+    }
+
+    function renderChoiceGroups() {
+      Object.entries(choiceGroups).forEach(([key, config]) => {
+        const container = document.getElementById(config.container);
+        container.innerHTML = "";
+        config.values.forEach((value) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "choice";
+          button.dataset.group = key;
+          button.dataset.value = value;
+          button.textContent = value;
+          button.addEventListener("click", () => {
+            if (!config.multiple) {
+              [...container.children].forEach((child) => child.classList.remove("active"));
+            }
+            button.classList.toggle("active");
+            if (!config.multiple && value === "未選択") {
+              button.classList.remove("active");
+            }
+            if (key === "sPart") renderPartDetails();
+            if (key === "additionalTreatments") renderAdditionalTreatmentDetails();
+            saveCurrentSlot();
+            renderTimeline();
+          });
+          container.appendChild(button);
+        });
+      });
+    }
+
+    function renderAdditionalTreatmentDetails() {
+      const selected = getChoiceValues("additionalTreatments");
+      const hasMore = selected.includes("MORE");
+      const hasPelvic = selected.includes("骨盤");
+      const hasEms = selected.includes("EMS");
+      document.getElementById("additionalTreatmentDetails").classList.toggle("hidden", !(hasMore || hasPelvic || hasEms));
+      document.getElementById("moreDetail").classList.toggle("hidden", !hasMore);
+      document.getElementById("pelvicDetail").classList.toggle("hidden", !hasPelvic);
+      document.getElementById("emsDetail").classList.toggle("hidden", !hasEms);
+    }
+
+    function fillEmsCurrentOptions() {
+      fields.emsCurrent.innerHTML = '<option value=""></option>';
+      for (let i = 1; i <= 100; i += 1) {
+        const option = document.createElement("option");
+        option.value = String(i);
+        option.textContent = String(i);
+        fields.emsCurrent.appendChild(option);
+      }
+    }
+
+    function renderPelvicNumberPad() {
+      const pad = document.getElementById("pelvicNumberPad");
+      const values = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "消", "戻"];
+      pad.innerHTML = "";
+      values.forEach((value) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = value;
+        button.addEventListener("click", () => {
+          const target = getPelvicTarget();
+          if (value === "消") {
+            target.value = "";
+          } else if (value === "戻") {
+            target.value = target.value.slice(0, -1);
+          } else {
+            target.value += value;
+          }
+          updatePelvicDisplays();
+          saveCurrentSlot();
+          renderTimeline();
+        });
+        pad.appendChild(button);
+      });
+    }
+
+    function getPelvicTarget() {
+      return pelvicInputTarget === "current" ? fields.pelvicCurrent : fields.pelvicPrev;
+    }
+
+    function updatePelvicDisplays() {
+      fields.pelvicPrev.textContent = fields.pelvicPrev.value || "未入力";
+      fields.pelvicCurrent.textContent = fields.pelvicCurrent.value || "未入力";
+      fields.pelvicPrev.classList.toggle("active", pelvicInputTarget === "prev");
+      fields.pelvicCurrent.classList.toggle("active", pelvicInputTarget === "current");
+    }
+
+    function renderPartDetails(sourceSlot) {
+      const container = document.getElementById("sPartDetailChoices");
+      const slot = sourceSlot || ensureSlot(selectedPractitioner, selectedTime);
+      const selectedParts = getChoiceValues("sPart").filter((part) => part !== "前回と同じ" && part !== "その他");
+      container.innerHTML = "";
+      container.classList.toggle("hidden", selectedParts.length === 0);
+
+      selectedParts.forEach((part) => {
+        const row = document.createElement("div");
+        row.className = "part-detail-row";
+        const label = document.createElement("div");
+        label.className = "part-detail-label";
+        label.textContent = part;
+        const choices = document.createElement("div");
+        choices.className = "choice-group";
+
+        if (part === "指") {
+          fingers.forEach((finger) => {
+            choices.appendChild(createPartDetailButton("finger", part, finger, slot.s.fingers.includes(finger)));
+          });
+        } else {
+          partSides.forEach((side) => {
+            choices.appendChild(createPartDetailButton("side", part, side, slot.s.partDetails[part] === side));
+          });
+        }
+
+        row.appendChild(label);
+        row.appendChild(choices);
+        container.appendChild(row);
+      });
+    }
+
+    function createPartDetailButton(kind, part, value, active) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `choice${active ? " active" : ""}`;
+      button.dataset.kind = kind;
+      button.dataset.part = part;
+      button.dataset.value = value;
+      button.textContent = value;
+      button.addEventListener("click", () => {
+        if (kind === "side") {
+          [...button.parentElement.children].forEach((child) => child.classList.remove("active"));
+        }
+        button.classList.toggle("active");
+        saveCurrentSlot();
+        renderTimeline();
+      });
+      return button;
+    }
+
+    function getPartDetails() {
+      const details = {};
+      document.querySelectorAll("#sPartDetailChoices [data-kind='side'].active").forEach((button) => {
+        details[button.dataset.part] = button.dataset.value;
+      });
+      return details;
+    }
+
+    function getFingerValues() {
+      return [...document.querySelectorAll("#sPartDetailChoices [data-kind='finger'].active")]
+        .map((button) => button.dataset.value);
+    }
+
+    function getChoiceValues(key) {
+      const config = choiceGroups[key];
+      const values = [...document.getElementById(config.container).querySelectorAll(".active")]
+        .map((button) => button.dataset.value)
+        .filter((value) => value !== "未選択");
+      return config.multiple ? values : (values[0] || "");
+    }
+
+    function setChoiceValues(key, values) {
+      const config = choiceGroups[key];
+      const selected = new Set(Array.isArray(values) ? values : (values ? [values] : []));
+      [...document.getElementById(config.container).children].forEach((button) => {
+        button.classList.toggle("active", selected.has(button.dataset.value));
+      });
+    }
+
+    function saveCurrentSlot() {
+      const slot = ensureSlot(selectedPractitioner, selectedTime);
+      slot.s.part = getChoiceValues("sPart");
+      slot.s.partDetails = getPartDetails();
+      slot.s.fingers = getFingerValues();
+      slot.s.condition = getChoiceValues("sCondition");
+      slot.s.change = getChoiceValues("sChange");
+      slot.s.request = getChoiceValues("sRequest");
+      slot.s.memo = fields.sMemo.value;
+      slot.additionalTreatments = getChoiceValues("additionalTreatments");
+      slot.additionalDetails.moreCount = slot.additionalTreatments.includes("MORE") ? getChoiceValues("moreCount") : "";
+      slot.additionalDetails.pelvicPrev = slot.additionalTreatments.includes("骨盤") ? fields.pelvicPrev.value : "";
+      slot.additionalDetails.pelvicCurrent = slot.additionalTreatments.includes("骨盤") ? fields.pelvicCurrent.value : "";
+      slot.additionalDetails.emsMode = slot.additionalTreatments.includes("EMS") ? getChoiceValues("emsMode") : "";
+      slot.additionalDetails.emsCurrent = slot.additionalTreatments.includes("EMS") ? fields.emsCurrent.value : "";
+      document.querySelectorAll("[data-finding]").forEach((select) => {
+        slot.o[select.dataset.finding] = select.value;
+      });
+      document.querySelectorAll("[data-finding-note]").forEach((input) => {
+        slot.oNotes[input.dataset.findingNote] = input.value;
+      });
+      slot.p.treatment = getChoiceValues("pTreatment");
+      slot.p.treatmentMemo = fields.pTreatmentMemo.value;
+      slot.p.guidance = getChoiceValues("pGuidance");
+      slot.p.guidanceMemo = fields.pGuidanceMemo.value;
+      slot.p.next = getChoiceValues("pNext");
+      slot.p.nextMemo = fields.pNextMemo.value;
+      slot.output = fields.soapOutput.value;
+      persistState();
+    }
+
+    function loadSlot(time) {
+      const slot = ensureSlot(selectedPractitioner, time);
+      setChoiceValues("sPart", slot.s.part);
+      renderPartDetails(slot);
+      setChoiceValues("sCondition", slot.s.condition);
+      setChoiceValues("sChange", slot.s.change);
+      setChoiceValues("sRequest", slot.s.request);
+      fields.sMemo.value = slot.s.memo;
+      setChoiceValues("additionalTreatments", slot.additionalTreatments);
+      setChoiceValues("moreCount", slot.additionalDetails.moreCount);
+      fields.pelvicPrev.value = slot.additionalDetails.pelvicPrev;
+      fields.pelvicCurrent.value = slot.additionalDetails.pelvicCurrent;
+      updatePelvicDisplays();
+      setChoiceValues("emsMode", slot.additionalDetails.emsMode);
+      fields.emsCurrent.value = slot.additionalDetails.emsCurrent;
+      renderAdditionalTreatmentDetails();
+      document.querySelectorAll("[data-finding]").forEach((select) => {
+        select.value = slot.o[select.dataset.finding] || "なし";
+      });
+      document.querySelectorAll("[data-finding-note]").forEach((input) => {
+        input.value = slot.oNotes[input.dataset.findingNote] || "";
+      });
+      setChoiceValues("pTreatment", slot.p.treatment);
+      fields.pTreatmentMemo.value = slot.p.treatmentMemo;
+      setChoiceValues("pGuidance", slot.p.guidance);
+      fields.pGuidanceMemo.value = slot.p.guidanceMemo;
+      setChoiceValues("pNext", slot.p.next);
+      fields.pNextMemo.value = slot.p.nextMemo;
+      fields.soapOutput.value = slot.output;
+      updateSelectedLabel();
+      updateCounter();
+    }
+
+    function selectTime(time) {
+      saveCurrentSlot();
+      selectedTime = time;
+      loadSlot(time);
+      renderTimeline();
+    }
+
+    function selectPractitioner(practitionerId) {
+      if (practitionerId === selectedPractitioner) return;
+      saveCurrentSlot();
+      selectedPractitioner = practitionerId;
+      selectedTime = "09:00";
+      loadSlot(selectedTime);
+      renderPractitioners();
+      renderTimeline();
+    }
+
+    function updateSelectedLabel() {
+    }
+
+    function generateSoap() {
+      saveCurrentSlot();
+      const slot = ensureSlot(selectedPractitioner, selectedTime);
+      const soap = [
+        `S：${buildSubjective(slot)}`,
+        `O：${buildObjective(slot)}`,
+        `A：${buildAssessment(slot)}`,
+        `P：${buildPlan(slot)}`
+      ].join("\n\n");
+      fields.soapOutput.value = limitMemoLength(soap);
+      saveCurrentSlot();
+      updateCounter();
+      renderTimeline();
+      setMessage("SOAPを生成しました");
+    }
+
+    function buildSubjective(slot) {
+      const items = [];
+      const change = formatChoiceText(slot.s.change, "");
+      const part = formatSubjectiveParts(slot);
+      const condition = formatChoiceText(slot.s.condition, "");
+      const request = formatChoiceText(slot.s.request, "");
+      const memo = slot.s.memo.trim();
+      if (change) items.push(`前回からの変化は${change}`);
+      if (part) items.push(`本日気になる部位は${part}`);
+      if (condition) items.push(`本日の状態は${condition}`);
+      if (request) items.push(`本日の希望は${request}`);
+      if (memo) items.push(`その他メモ：${memo}`);
+      return finishSentence(items.length ? items.join("。") : "患者申告の入力なし");
+    }
+
+    function formatSubjectiveParts(slot) {
+      return slot.s.part.map((part) => formatSubjectivePart(part, slot)).filter(Boolean).join("、");
+    }
+
+    function formatSubjectivePart(part, slot) {
+      if (part === "前回と同じ" || part === "その他") return part;
+      if (part === "指") return formatFingerPart(slot);
+      return applyPartSide(part, slot.s.partDetails[part]);
+    }
+
+    function formatFingerPart(slot) {
+      const selected = slot.s.fingers && slot.s.fingers.length ? slot.s.fingers : ["指"];
+      const side = slot.s.partDetails["指"];
+      if (side === "右" || side === "左") return selected.map((finger) => `${side}${finger}`).join("・");
+      if (side === "両方") return selected.map((finger) => `両${finger}`).join("・");
+      return selected.join("・");
+    }
+
+    function applyPartSide(part, side) {
+      if (side === "右" || side === "左") return `${side}${part}`;
+      if (side === "両方") return `両${part}`;
+      return part;
+    }
+
+    function buildObjective(slot) {
+      const active = findings
+        .filter((name) => slot.o[name] && slot.o[name] !== "なし")
+        .map((name) => formatObjectiveFinding(name, slot));
+      if (!active.length) return "施術者確認後に記載。";
+      return finishSentence(active.join("、"));
+    }
+
+    function formatObjectiveFinding(name, slot) {
+      const noteLabel = findingNoteLabels[name];
+      const note = noteLabel ? (slot.oNotes[name] || "").trim() : "";
+      return `${name}：${slot.o[name]}${note ? `（${noteLabel}：${note}）` : ""}`;
+    }
+
+    function buildAssessment(slot) {
+      const activeCount = findings.filter((name) => slot.o[name] && slot.o[name] !== "なし").length;
+      const strong = findings.filter((name) => slot.o[name] === "強度").map((name) => name);
+      const moderate = findings.filter((name) => slot.o[name] === "中等度").map((name) => name);
+      const change = formatChoiceText(slot.s.change, "");
+      const part = formatSubjectiveParts(slot) || "該当部位";
+
+      if (!activeCount && !hasSubjectiveInput(slot)) {
+        return "S/O確認後に状態評価を記載。";
+      }
+      if (!activeCount) {
+        return "患者申告を踏まえ、施術者確認後に状態評価を記載。";
+      }
+      if (strong.length) {
+        return finishSentence(`${part}は${strong.join("、")}が強く、負担要因や前回比を確認しながら経過を見る`);
+      }
+      if (moderate.length) {
+        return finishSentence(`${part}は${moderate.join("、")}が中等度で、負担要因との関連を確認する`);
+      }
+      if (change) {
+        return finishSentence(`前回からの変化は「${change}」との申告で、O所見とあわせて経過確認が必要`);
+      }
+      return finishSentence(`${part}に軽度所見を認め、経過を確認する`);
+    }
+
+    function buildPlan(slot) {
+      const items = [];
+      const additionalItems = buildAdditionalPlanItems(slot);
+      const treatment = formatChoiceText(slot.p.treatment, slot.p.treatmentMemo);
+      const guidance = formatChoiceText(slot.p.guidance, slot.p.guidanceMemo);
+      const next = formatChoiceText(slot.p.next, slot.p.nextMemo);
+      if (additionalItems.length) items.push(...additionalItems);
+      if (treatment) items.push(`本日行った施術は${treatment}`);
+      if (guidance) items.push(`指導内容は${guidance}`);
+      if (next) items.push(`次回確認事項は${next}`);
+      return finishSentence(items.length ? items.join("。") : "施術者確認後に記載");
+    }
+
+    function buildAdditionalPlanItems(slot) {
+      const details = slot.additionalDetails;
+      return slot.additionalTreatments.map((item) => {
+        if (item === "MORE") {
+          return `追加施術としてMORE${details.moreCount ? `を${details.moreCount}` : "を"}実施`;
+        }
+        if (item === "骨盤") {
+          const values = details.pelvicPrev && details.pelvicCurrent
+            ? `前回${details.pelvicPrev}→今回${details.pelvicCurrent}`
+            : "";
+          return `追加施術として骨盤を実施${values ? `。${values}` : ""}`;
+        }
+        if (item === "EMS") {
+          const emsDetails = [details.emsMode, details.emsCurrent ? `電流量${details.emsCurrent}` : ""].filter(Boolean).join("、");
+          return `追加施術としてEMSを実施${emsDetails ? `。${emsDetails}` : ""}`;
+        }
+        return `追加施術として${item}を実施`;
+      });
+    }
+
+    function hasSubjectiveInput(slot) {
+      return Boolean(
+        slot.s.part.length ||
+        slot.s.condition.length ||
+        slot.s.change ||
+        slot.s.request.length ||
+        slot.s.memo.trim()
+      );
+    }
+
+    function formatChoiceText(values, memo) {
+      const selected = Array.isArray(values) ? values : (values ? [values] : []);
+      const usable = selected.filter((value) => value !== "未選択");
+      const text = usable.join("、");
+      const note = memo.trim();
+      if (text && note) return `${text}（${note}）`;
+      return text || note;
+    }
+
+    function finishSentence(text) {
+      const cleaned = text.trim().replace(/[。]+$/g, "");
+      return `${cleaned}。`;
+    }
+
+    function limitMemoLength(text) {
+      return text.length <= 250 ? text : `${text.slice(0, 249).replace(/[。、\s]+$/g, "")}。`;
+    }
+
+    async function copySoap() {
+      saveCurrentSlot();
+      const text = fields.soapOutput.value.trim();
+      if (!text) {
+        setMessage("コピーする文章がありません");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        setMessage("コピーしました");
+      } catch (error) {
+        fields.soapOutput.focus();
+        fields.soapOutput.select();
+        const copied = document.execCommand("copy");
+        setMessage(copied ? "コピーしました" : "コピーできませんでした");
+      }
+    }
+
+    function clearSelectedSlot() {
+      if (!confirm("本当にクリアして良いですか？")) return;
+      state[todayKey][selectedPractitioner][selectedTime] = blankSlot();
+      persistState();
+      loadSlot(selectedTime);
+      renderTimeline();
+      setMessage("選択枠をクリアしました");
+    }
+
+    function clearAllSlots() {
+      if (!confirm("本当にクリアして良いですか？")) return;
+      createTimes().forEach((time) => {
+        ensureSlot(selectedPractitioner, time);
+        state[todayKey][selectedPractitioner][time] = blankSlot();
+      });
+      persistState();
+      loadSlot(selectedTime);
+      renderTimeline();
+      setMessage("全枠をクリアしました");
+    }
+
+    function updateCounter() {
+      document.getElementById("counter").textContent = `${fields.soapOutput.value.length}字`;
+    }
+
+    function bindInputs() {
+      Object.values(fields).forEach((field) => {
+        field.addEventListener("input", () => {
+          saveCurrentSlot();
+          updateCounter();
+          renderTimeline();
+        });
+        field.addEventListener("change", () => {
+          saveCurrentSlot();
+          renderTimeline();
+        });
+      });
+      document.getElementById("generateBtn").addEventListener("click", generateSoap);
+      document.getElementById("copyBtn").addEventListener("click", copySoap);
+      document.getElementById("clearSlotBtn").addEventListener("click", clearSelectedSlot);
+      document.getElementById("clearAllBtn").addEventListener("click", clearAllSlots);
+      fields.pelvicPrev.addEventListener("click", () => {
+        pelvicInputTarget = "prev";
+        updatePelvicDisplays();
+      });
+      fields.pelvicCurrent.addEventListener("click", () => {
+        pelvicInputTarget = "current";
+        updatePelvicDisplays();
+      });
+    }
+
+    function init() {
+      document.getElementById("todayLabel").textContent = `保存日：${todayKey}`;
+      renderChoiceGroups();
+      renderFindings();
+      fillEmsCurrentOptions();
+      renderPelvicNumberPad();
+      renderPractitioners();
+      bindInputs();
+      practitioners.forEach((item) => {
+        createTimes().forEach((time) => ensureSlot(item.id, time));
+      });
+      loadSlot(selectedTime);
+      renderTimeline();
+      persistState();
+    }
+
+    init();
+  </script>
+</body>
+</html>
+
