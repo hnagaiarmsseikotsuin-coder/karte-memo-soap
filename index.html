@@ -552,6 +552,7 @@
                 <div class="field full">
                   <label>本日の状態</label>
                   <div id="sConditionChoices" class="choice-group"></div>
+                  <div id="sConditionLevelChoices" class="part-detail hidden"></div>
                 </div>
                 <div class="field full">
                   <label>本日の希望</label>
@@ -644,25 +645,27 @@
     ];
     const choiceGroups = {
       sChange: { container: "sChangeChoices", values: ["前回と同じ", "良い", "少し良い", "変化なし", "少し悪い", "悪い", "別部位あり"], multiple: false },
-      sPart: { container: "sPartChoices", values: ["前回と同じ", "首", "肩", "背中", "腰", "股関節", "膝", "足首", "肘", "手首", "ふくらはぎ", "足裏", "指", "その他"], multiple: true },
+      sPart: { container: "sPartChoices", values: ["前回と同じ", "頭", "首", "肩", "腕", "背中", "腰", "股関節", "太もも", "膝", "足首", "肘", "手首", "ふくらはぎ", "足裏", "指", "その他"], multiple: true },
       sCondition: { container: "sConditionChoices", values: ["前回と同じ", "痛い", "重い", "張る", "だるい", "違和感", "しびれ", "動かしにくい", "その他"], multiple: true },
       sRequest: { container: "sRequestChoices", values: ["いつも通り", "重点確認", "軽め", "強め", "相談あり", "その他"], multiple: true },
       additionalTreatments: { container: "additionalTreatmentChoices", values: ["MORE", "足リンパ", "骨盤", "ハイボル", "EMS", "小顔", "テーピング"], multiple: true },
       moreCount: { container: "moreCountChoices", values: ["1回", "2回", "3回"], multiple: false },
       emsMode: { container: "emsModeChoices", values: ["A：干渉波＋変調波 4K40 8K40", "B：干渉波＋変調波 F-1 F-2", "C：パルス波 4K40 8K40", "D：パルス波 F-5 F-6"], multiple: false },
-      pTreatment: { container: "pTreatmentChoices", values: ["手技", "ストレッチ", "関節調整", "テーピング", "確認のみ", "その他"], multiple: true },
+      pTreatment: { container: "pTreatmentChoices", values: ["手技", "ストレッチ", "関節可動域訓練", "テーピング", "確認のみ", "その他"], multiple: true },
       pGuidance: { container: "pGuidanceChoices", values: ["姿勢", "歩行", "座位", "睡眠", "運動", "ストレッチ", "負担動作注意", "なし", "その他"], multiple: true },
       pNext: { container: "pNextChoices", values: ["同部位の変化", "症状レベル", "可動域", "負担動作", "施術反応", "通常通り", "その他"], multiple: true }
     };
     const partSides = ["右", "左", "両方"];
     const fingers = ["親指", "人差し指", "中指", "薬指", "小指"];
-    const findings = ["圧痛", "運動痛", "自発痛", "炎症所見（熱感・発赤）", "骨折の疑い（異常可動性・軋轢音・転移・変形）", "脱臼の疑い（弾発性固定・関節部の変形・関節窩の空虚）"];
-    const findingLevels = ["なし", "軽度", "中等度", "強度"];
+    const conditionLevels = ["軽度：1〜3", "中等度：4〜7", "重度：8〜10"];
+    const findings = ["圧痛", "運動痛", "自律神経症状の疑い（めまい・耳鳴り・気持ち悪さ・緊張痛）", "自発痛", "炎症所見（熱感・発赤）", "骨折の疑い（異常可動性・軋轢音・転移・変形）", "脱臼の疑い（弾発性固定・関節部の変形・関節窩の空虚）"];
+    const findingLevels = ["なし", "軽度", "中等度", "重度"];
     const findingNoteLabels = {
       "圧痛": "部位",
       "自発痛": "部位",
       "炎症所見（熱感・発赤）": "部位",
-      "運動痛": "関節・方向・角度"
+      "運動痛": "関節・方向・角度",
+      "自律神経症状の疑い（めまい・耳鳴り・気持ち悪さ・緊張痛）": "詳細"
     };
     const todayKey = new Date().toLocaleDateString("sv-SE");
     const state = loadState();
@@ -693,6 +696,7 @@
           partDetails: {},
           fingers: [],
           condition: [],
+          conditionLevels: {},
           change: "",
           request: [],
           memo: ""
@@ -769,7 +773,8 @@
       if (!slot.additionalDetails) slot.additionalDetails = blankSlot().additionalDetails;
       normalizeSlot(slot);
       findings.forEach((name) => {
-        if (!slot.o[name] || slot.o[name] === "強い") slot.o[name] = slot.o[name] === "強い" ? "強度" : "なし";
+        if (!slot.o[name]) slot.o[name] = "なし";
+        if (slot.o[name] === "強い" || slot.o[name] === "強度") slot.o[name] = "重度";
         if (findingNoteLabels[name] && typeof slot.oNotes[name] !== "string") slot.oNotes[name] = "";
       });
       if (typeof slot.output !== "string") slot.output = "";
@@ -781,6 +786,7 @@
       if (!slot.s.partDetails || typeof slot.s.partDetails !== "object" || Array.isArray(slot.s.partDetails)) slot.s.partDetails = {};
       if (!Array.isArray(slot.s.fingers)) slot.s.fingers = [];
       normalizeMulti(slot.s, "condition");
+      if (!slot.s.conditionLevels || typeof slot.s.conditionLevels !== "object" || Array.isArray(slot.s.conditionLevels)) slot.s.conditionLevels = {};
       normalizeSingle(slot.s, "change");
       normalizeMulti(slot.s, "request");
       normalizeSimpleMemo(slot.s);
@@ -791,6 +797,7 @@
       normalizeSingle(slot.additionalDetails, "emsMode");
       normalizeSingle(slot.additionalDetails, "emsCurrent");
       normalizeMulti(slot.p, "treatment", "treatmentMemo");
+      slot.p.treatment = slot.p.treatment.map((value) => value === "関節調整" ? "関節可動域訓練" : value);
       slot.p.treatment = slot.p.treatment.filter((value) => value !== "固定");
       normalizeMulti(slot.p, "electric", "electricMemo");
       normalizeMulti(slot.p, "guidance", "guidanceMemo");
@@ -835,6 +842,7 @@
         Object.keys(slot.s.partDetails).length ||
         slot.s.fingers.length ||
         slot.s.condition.length ||
+        Object.keys(slot.s.conditionLevels).length ||
         slot.s.change ||
         slot.s.request.length ||
         slot.s.memo.trim() ||
@@ -979,6 +987,7 @@
               button.classList.remove("active");
             }
             if (key === "sPart") renderPartDetails();
+            if (key === "sCondition") renderConditionLevels();
             if (key === "additionalTreatments") renderAdditionalTreatmentDetails();
             saveCurrentSlot();
             renderTimeline();
@@ -1109,6 +1118,56 @@
         .map((button) => button.dataset.value);
     }
 
+    function renderConditionLevels(sourceSlot) {
+      const container = document.getElementById("sConditionLevelChoices");
+      const slot = sourceSlot || ensureSlot(selectedPractitioner, selectedTime);
+      const selectedConditions = getChoiceValues("sCondition").filter((condition) => condition !== "前回と同じ" && condition !== "その他");
+      container.innerHTML = "";
+      container.classList.toggle("hidden", selectedConditions.length === 0);
+
+      selectedConditions.forEach((condition) => {
+        const row = document.createElement("div");
+        row.className = "part-detail-row";
+        const label = document.createElement("div");
+        label.className = "part-detail-label";
+        label.textContent = condition;
+        const choices = document.createElement("div");
+        choices.className = "choice-group";
+
+        conditionLevels.forEach((level) => {
+          choices.appendChild(createConditionLevelButton(condition, level, slot.s.conditionLevels[condition] === level));
+        });
+
+        row.appendChild(label);
+        row.appendChild(choices);
+        container.appendChild(row);
+      });
+    }
+
+    function createConditionLevelButton(condition, value, active) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `choice${active ? " active" : ""}`;
+      button.dataset.condition = condition;
+      button.dataset.conditionLevel = value;
+      button.textContent = value;
+      button.addEventListener("click", () => {
+        [...button.parentElement.children].forEach((child) => child.classList.remove("active"));
+        button.classList.toggle("active");
+        saveCurrentSlot();
+        renderTimeline();
+      });
+      return button;
+    }
+
+    function getConditionLevels() {
+      const levels = {};
+      document.querySelectorAll("#sConditionLevelChoices [data-condition-level].active").forEach((button) => {
+        levels[button.dataset.condition] = button.dataset.conditionLevel;
+      });
+      return levels;
+    }
+
     function getChoiceValues(key) {
       const config = choiceGroups[key];
       const values = [...document.getElementById(config.container).querySelectorAll(".active")]
@@ -1131,6 +1190,7 @@
       slot.s.partDetails = getPartDetails();
       slot.s.fingers = getFingerValues();
       slot.s.condition = getChoiceValues("sCondition");
+      slot.s.conditionLevels = getConditionLevels();
       slot.s.change = getChoiceValues("sChange");
       slot.s.request = getChoiceValues("sRequest");
       slot.s.memo = fields.sMemo.value;
@@ -1161,6 +1221,7 @@
       setChoiceValues("sPart", slot.s.part);
       renderPartDetails(slot);
       setChoiceValues("sCondition", slot.s.condition);
+      renderConditionLevels(slot);
       setChoiceValues("sChange", slot.s.change);
       setChoiceValues("sRequest", slot.s.request);
       fields.sMemo.value = slot.s.memo;
@@ -1229,7 +1290,7 @@
       const items = [];
       const change = formatChoiceText(slot.s.change, "");
       const part = formatSubjectiveParts(slot);
-      const condition = formatChoiceText(slot.s.condition, "");
+      const condition = formatSubjectiveConditions(slot);
       const request = formatChoiceText(slot.s.request, "");
       const memo = slot.s.memo.trim();
       if (change) items.push(`前回からの変化は${change}`);
@@ -1242,6 +1303,13 @@
 
     function formatSubjectiveParts(slot) {
       return slot.s.part.map((part) => formatSubjectivePart(part, slot)).filter(Boolean).join("、");
+    }
+
+    function formatSubjectiveConditions(slot) {
+      return slot.s.condition.map((condition) => {
+        const level = slot.s.conditionLevels[condition];
+        return level ? `${condition}（${level}）` : condition;
+      }).join("、");
     }
 
     function formatSubjectivePart(part, slot) {
@@ -1280,7 +1348,7 @@
 
     function buildAssessment(slot) {
       const activeCount = findings.filter((name) => slot.o[name] && slot.o[name] !== "なし").length;
-      const strong = findings.filter((name) => slot.o[name] === "強度").map((name) => name);
+      const strong = findings.filter((name) => slot.o[name] === "重度").map((name) => name);
       const moderate = findings.filter((name) => slot.o[name] === "中等度").map((name) => name);
       const change = formatChoiceText(slot.s.change, "");
       const part = formatSubjectiveParts(slot) || "該当部位";
