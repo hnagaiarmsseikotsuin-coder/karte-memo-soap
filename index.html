@@ -645,7 +645,7 @@
     ];
     const choiceGroups = {
       sChange: { container: "sChangeChoices", values: ["前回と同じ", "良い", "少し良い", "変化なし", "少し悪い", "悪い", "別部位あり"], multiple: false },
-      sPart: { container: "sPartChoices", values: ["前回と同じ", "頭", "首", "肩", "腕", "背中", "腰", "股関節", "太もも", "膝", "足首", "肘", "手首", "ふくらはぎ", "足裏", "指", "その他"], multiple: true },
+      sPart: { container: "sPartChoices", values: ["前回と同じ", "頭", "首", "肩", "腕", "肘", "手首", "手の指", "背中", "腰", "骨盤", "股関節", "太もも", "膝", "ふくらはぎ", "足首", "足裏", "足の指", "その他"], multiple: true },
       sCondition: { container: "sConditionChoices", values: ["前回と同じ", "痛い", "重い", "張る", "だるい", "違和感", "しびれ", "動かしにくい", "その他"], multiple: true },
       sRequest: { container: "sRequestChoices", values: ["いつも通り", "重点確認", "軽め", "強め", "相談あり", "その他"], multiple: true },
       additionalTreatments: { container: "additionalTreatmentChoices", values: ["MORE", "足リンパ", "骨盤", "ハイボル", "EMS", "小顔", "テーピング"], multiple: true },
@@ -695,6 +695,7 @@
           part: [],
           partDetails: {},
           fingers: [],
+          fingerDetails: {},
           condition: [],
           conditionLevels: {},
           change: "",
@@ -785,6 +786,14 @@
       normalizeMulti(slot.s, "part");
       if (!slot.s.partDetails || typeof slot.s.partDetails !== "object" || Array.isArray(slot.s.partDetails)) slot.s.partDetails = {};
       if (!Array.isArray(slot.s.fingers)) slot.s.fingers = [];
+      if (!slot.s.fingerDetails || typeof slot.s.fingerDetails !== "object" || Array.isArray(slot.s.fingerDetails)) slot.s.fingerDetails = {};
+      if (slot.s.partDetails["指"] && !slot.s.partDetails["手の指"]) slot.s.partDetails["手の指"] = slot.s.partDetails["指"];
+      if (!Array.isArray(slot.s.fingerDetails["手の指"])) slot.s.fingerDetails["手の指"] = slot.s.fingers.filter(Boolean);
+      if (!Array.isArray(slot.s.fingerDetails["足の指"])) slot.s.fingerDetails["足の指"] = [];
+      slot.s.part = slot.s.part
+        .map((part) => part === "指" ? "手の指" : part)
+        .filter((part, index, parts) => choiceGroups.sPart.values.includes(part) && parts.indexOf(part) === index)
+        .sort((left, right) => choiceGroups.sPart.values.indexOf(left) - choiceGroups.sPart.values.indexOf(right));
       normalizeMulti(slot.s, "condition");
       if (!slot.s.conditionLevels || typeof slot.s.conditionLevels !== "object" || Array.isArray(slot.s.conditionLevels)) slot.s.conditionLevels = {};
       normalizeSingle(slot.s, "change");
@@ -841,6 +850,7 @@
         slot.s.part.length ||
         Object.keys(slot.s.partDetails).length ||
         slot.s.fingers.length ||
+        Object.values(slot.s.fingerDetails).some((items) => Array.isArray(items) && items.length) ||
         slot.s.condition.length ||
         Object.keys(slot.s.conditionLevels).length ||
         slot.s.change ||
@@ -1070,9 +1080,12 @@
         const choices = document.createElement("div");
         choices.className = "choice-group";
 
-        if (part === "指") {
+        if (isFingerPart(part)) {
+          partSides.forEach((side) => {
+            choices.appendChild(createPartDetailButton("side", part, side, slot.s.partDetails[part] === side));
+          });
           fingers.forEach((finger) => {
-            choices.appendChild(createPartDetailButton("finger", part, finger, slot.s.fingers.includes(finger)));
+            choices.appendChild(createPartDetailButton("finger", part, finger, slot.s.fingerDetails[part].includes(finger)));
           });
         } else {
           partSides.forEach((side) => {
@@ -1096,7 +1109,9 @@
       button.textContent = value;
       button.addEventListener("click", () => {
         if (kind === "side") {
-          [...button.parentElement.children].forEach((child) => child.classList.remove("active"));
+          [...button.parentElement.children]
+            .filter((child) => child.dataset.kind === "side")
+            .forEach((child) => child.classList.remove("active"));
         }
         button.classList.toggle("active");
         saveCurrentSlot();
@@ -1113,9 +1128,17 @@
       return details;
     }
 
-    function getFingerValues() {
-      return [...document.querySelectorAll("#sPartDetailChoices [data-kind='finger'].active")]
-        .map((button) => button.dataset.value);
+    function isFingerPart(part) {
+      return part === "手の指" || part === "足の指";
+    }
+
+    function getFingerDetails() {
+      const details = {};
+      document.querySelectorAll("#sPartDetailChoices [data-kind='finger'].active").forEach((button) => {
+        if (!details[button.dataset.part]) details[button.dataset.part] = [];
+        details[button.dataset.part].push(button.dataset.value);
+      });
+      return details;
     }
 
     function renderConditionLevels(sourceSlot) {
@@ -1188,7 +1211,8 @@
       const slot = ensureSlot(selectedPractitioner, selectedTime);
       slot.s.part = getChoiceValues("sPart");
       slot.s.partDetails = getPartDetails();
-      slot.s.fingers = getFingerValues();
+      slot.s.fingerDetails = getFingerDetails();
+      slot.s.fingers = slot.s.fingerDetails["手の指"] || [];
       slot.s.condition = getChoiceValues("sCondition");
       slot.s.conditionLevels = getConditionLevels();
       slot.s.change = getChoiceValues("sChange");
@@ -1314,16 +1338,15 @@
 
     function formatSubjectivePart(part, slot) {
       if (part === "前回と同じ" || part === "その他") return part;
-      if (part === "指") return formatFingerPart(slot);
+      if (isFingerPart(part)) return formatFingerPart(part, slot);
       return applyPartSide(part, slot.s.partDetails[part]);
     }
 
-    function formatFingerPart(slot) {
-      const selected = slot.s.fingers && slot.s.fingers.length ? slot.s.fingers : ["指"];
-      const side = slot.s.partDetails["指"];
-      if (side === "右" || side === "左") return selected.map((finger) => `${side}${finger}`).join("・");
-      if (side === "両方") return selected.map((finger) => `両${finger}`).join("・");
-      return selected.join("・");
+    function formatFingerPart(part, slot) {
+      const selected = slot.s.fingerDetails[part] || [];
+      const side = slot.s.partDetails[part];
+      const label = applyPartSide(part, side);
+      return selected.length ? `${label}（${selected.join("・")}）` : label;
     }
 
     function applyPartSide(part, side) {
