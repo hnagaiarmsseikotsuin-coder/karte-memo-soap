@@ -921,27 +921,41 @@
       return [];
     }
 
+    function getCloudRowValue(row, keys, index) {
+      if (Array.isArray(row)) return row[index];
+      for (const key of keys) {
+        if (row && row[key] !== undefined && row[key] !== null) return row[key];
+      }
+      return undefined;
+    }
+
     function parseCloudPayload(payload) {
       if (!payload) return null;
 
-      if (typeof payload === "string") {
+      let value = payload;
+      for (let index = 0; index < 2 && typeof value === "string"; index += 1) {
+        if (!value.trim()) return null;
         try {
-          return JSON.parse(payload);
+          value = JSON.parse(value);
         } catch (error) {
-          console.error("payload JSON parse error", error, payload);
+          console.error("payload JSON parse error", error, value);
           return null;
         }
       }
 
-      if (typeof payload === "object") {
-        return payload;
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return value;
       }
 
       return null;
     }
 
-    function getCloudPayload(row) {
-      const candidates = [row.payload, row.payload_json, row.payloadJson];
+    function getRowPayload(row) {
+      const candidates = [
+        getCloudRowValue(row, ["payload", "payload_json", "payloadJson"], 11),
+        getCloudRowValue(row, ["payload_json", "payloadJson"], 11),
+        getCloudRowValue(row, ["payload"], 11)
+      ];
       let fallback = null;
 
       for (const candidate of candidates) {
@@ -954,38 +968,78 @@
       return fallback;
     }
 
+    function getCloudPayload(row) {
+      return getRowPayload(row);
+    }
+
+    function hasCloudValue(value) {
+      if (value === null || value === undefined || value === false) return false;
+      if (typeof value === "string") {
+        const text = value.trim();
+        return Boolean(text && text !== "なし" && text !== "未選択");
+      }
+      if (typeof value === "number") return Number.isFinite(value);
+      if (Array.isArray(value)) return value.some((item) => hasCloudValue(item));
+      if (typeof value === "object") return Object.values(value).some((item) => hasCloudValue(item));
+      return Boolean(value);
+    }
+
     function hasCloudPayloadData(payload) {
       if (!payload || typeof payload !== "object") return false;
 
       return Boolean(
+        hasCloudValue(payload.selectedParts) ||
+        hasCloudValue(payload.subjectiveParts) ||
+        hasCloudValue(payload.objectiveFindings) ||
+        hasCloudValue(payload.assessment) ||
+        hasCloudValue(payload.plan) ||
+        hasCloudValue(payload.memo) ||
+        hasCloudValue(payload.soap) ||
+        hasCloudValue(payload.generatedMemo) ||
+        hasCloudValue(payload.painLevel) ||
+        hasCloudValue(payload.treatmentParts) ||
+        hasCloudValue(payload.burden) ||
+        hasCloudValue(payload.eventMemo) ||
         payload.output && String(payload.output).trim() ||
         payload.s && (
-          (Array.isArray(payload.s.part) && payload.s.part.length) ||
-          payload.s.partDetails && Object.keys(payload.s.partDetails).length ||
-          payload.s.fingerDetails && Object.values(payload.s.fingerDetails).some((items) => Array.isArray(items) && items.length) ||
-          (Array.isArray(payload.s.condition) && payload.s.condition.length) ||
-          payload.s.conditionLevels && Object.keys(payload.s.conditionLevels).length ||
-          payload.s.change ||
-          (Array.isArray(payload.s.request) && payload.s.request.length) ||
-          payload.s.memo && String(payload.s.memo).trim()
+          hasCloudValue(payload.s.part) ||
+          hasCloudValue(payload.s.partDetails) ||
+          hasCloudValue(payload.s.fingers) ||
+          hasCloudValue(payload.s.fingerDetails) ||
+          hasCloudValue(payload.s.condition) ||
+          hasCloudValue(payload.s.conditionLevels) ||
+          hasCloudValue(payload.s.change) ||
+          hasCloudValue(payload.s.request) ||
+          hasCloudValue(payload.s.memo)
         ) ||
-        Array.isArray(payload.additionalTreatments) && payload.additionalTreatments.length ||
-        payload.additionalDetails && Object.values(payload.additionalDetails).some((value) => value && String(value).trim()) ||
-        payload.o && Object.values(payload.o).some((value) => value && value !== "なし") ||
-        payload.oNotes && Object.values(payload.oNotes).some((value) => value && String(value).trim()) ||
+        hasCloudValue(payload.additionalTreatments) ||
+        hasCloudValue(payload.additionalDetails) ||
+        hasCloudValue(payload.o) ||
+        hasCloudValue(payload.oNotes) ||
         payload.p && (
-          (Array.isArray(payload.p.treatment) && payload.p.treatment.length) ||
-          payload.p.treatmentMemo && String(payload.p.treatmentMemo).trim() ||
-          (Array.isArray(payload.p.guidance) && payload.p.guidance.length) ||
-          payload.p.guidanceMemo && String(payload.p.guidanceMemo).trim() ||
-          (Array.isArray(payload.p.next) && payload.p.next.length) ||
-          payload.p.nextMemo && String(payload.p.nextMemo).trim()
+          hasCloudValue(payload.p.treatment) ||
+          hasCloudValue(payload.p.treatmentMemo) ||
+          hasCloudValue(payload.p.electric) ||
+          hasCloudValue(payload.p.electricMemo) ||
+          hasCloudValue(payload.p.guidance) ||
+          hasCloudValue(payload.p.guidanceMemo) ||
+          hasCloudValue(payload.p.next) ||
+          hasCloudValue(payload.p.nextMemo)
         )
       );
     }
 
+    function normalizeCloudBoolean(value) {
+      if (value === true || value === 1) return true;
+      if (typeof value === "string") {
+        const text = value.trim().toLowerCase();
+        return text === "true" || text === "1";
+      }
+      return false;
+    }
+
     function isCloudFilled(value) {
-      return value === true || value === "TRUE" || value === "true" || value === 1 || value === "1";
+      return normalizeCloudBoolean(value);
     }
 
     function normalizeCloudTimeSlot(value) {
@@ -999,6 +1053,13 @@
       }
 
       const text = String(value).trim();
+      if (/(T|Z|GMT|UTC|[+-]\d{2}:?\d{2}$)/i.test(text)) {
+        const parsedDateTime = new Date(text);
+        if (!Number.isNaN(parsedDateTime.getTime())) {
+          return `${String(parsedDateTime.getHours()).padStart(2, "0")}:${String(parsedDateTime.getMinutes()).padStart(2, "0")}`;
+        }
+      }
+
       const timeMatch = text.match(/\b(\d{1,2}):(\d{2})\b/);
       if (timeMatch) {
         return `${timeMatch[1].padStart(2, "0")}:${timeMatch[2]}`;
@@ -1024,7 +1085,7 @@
         console.log("共有更新 result", result);
         const rows = getCloudRows(result);
         console.log("共有更新 rows", rows);
-        console.log("共有更新 rows.length", Array.isArray(rows) ? rows.length : 0);
+        console.log("cloud rows length", Array.isArray(rows) ? rows.length : 0);
 
         if (!Array.isArray(rows) || rows.length === 0) {
           setMessage("共有データなし：表示日を確認してください");
@@ -1035,24 +1096,35 @@
 
         let appliedCount = 0;
         rows.forEach((row) => {
-          console.log("共有更新 row", row);
-          const practitionerId = row.practitioner_id || row.practitionerId;
-          const time = normalizeCloudTimeSlot(row.time_slot || row.timeSlot || row.time);
-          const payload = getCloudPayload(row);
+          console.log("cloud row", row);
+          const practitionerId = getCloudRowValue(row, ["practitioner_id", "practitionerId"], 2);
+          const rawTime = getCloudRowValue(row, ["time_slot", "timeSlot", "time"], 4);
+          const timeSlot = normalizeCloudTimeSlot(rawTime);
+          const isDeleted = normalizeCloudBoolean(getCloudRowValue(row, ["is_deleted", "isDeleted"], 9));
+          const payload = getRowPayload(row);
           const payloadHasData = hasCloudPayloadData(payload);
-          const filledByRow = isCloudFilled(row.is_filled || row.isFilled);
+          const filledByRow = normalizeCloudBoolean(getCloudRowValue(row, ["is_filled", "isFilled"], 10));
+          console.log("cloud payload", payload);
+          console.log("cloud has data", payloadHasData);
+          console.log("cloud target", activeDateKey, practitionerId, timeSlot);
           console.log("共有更新 row detail", {
-            record_key: row.record_key,
-            date: row.date,
+            record_key: getCloudRowValue(row, ["record_key", "recordKey"], 0),
+            date: getCloudRowValue(row, ["date"], 1),
             practitioner_id: practitionerId,
-            time_slot: time,
-            raw_time_slot: row.time_slot || row.timeSlot || row.time,
-            is_filled: row.is_filled,
+            time_slot: timeSlot,
+            raw_time_slot: rawTime,
+            is_deleted: isDeleted,
+            is_filled: getCloudRowValue(row, ["is_filled", "isFilled"], 10),
             payload,
             hasCloudPayloadData: payloadHasData
           });
 
-          if (!practitionerId || !time || !payload) {
+          if (isDeleted) {
+            console.warn("共有更新 skipped deleted row", row);
+            return;
+          }
+
+          if (!practitionerId || !timeSlot || !payload) {
             console.warn("共有更新 skipped", row);
             return;
           }
@@ -1068,24 +1140,27 @@
           }
 
           if (!state[activeDateKey][practitionerId]) state[activeDateKey][practitionerId] = {};
-          console.log("反映先", activeDateKey, practitionerId, time);
-          state[activeDateKey][practitionerId][time] = payload;
-          if (row.updated_at || row.version) {
-            state[activeDateKey][practitionerId][time].cloudMeta = {
-              updated_at: row.updated_at || "",
-              version: row.version || ""
+          state[activeDateKey][practitionerId][timeSlot] = payload;
+          const updatedAt = getCloudRowValue(row, ["updated_at", "updatedAt"], 6);
+          const version = getCloudRowValue(row, ["version"], 8);
+          if (updatedAt || version) {
+            state[activeDateKey][practitionerId][timeSlot].cloudMeta = {
+              updated_at: updatedAt || "",
+              version: version || ""
             };
           }
-          const normalizedSlot = ensureSlot(practitionerId, time, activeDateKey);
+          const normalizedSlot = ensureSlot(practitionerId, timeSlot, activeDateKey);
           const filledAfterApply = isFilled(normalizedSlot);
-          console.log("反映後 isFilled", activeDateKey, practitionerId, time, filledAfterApply, normalizedSlot);
+          console.log("反映後 isFilled", activeDateKey, practitionerId, timeSlot, filledAfterApply, normalizedSlot);
           if (filledAfterApply || payloadHasData) appliedCount += 1;
+          console.log("cloud applied count", appliedCount);
         });
+        console.log("cloud applied count", appliedCount);
         persistState();
         loadSlot(selectedTime);
         renderTimeline();
         if (appliedCount === 0) {
-          setMessage("共有データは取得しましたが、反映対象がありません");
+          setMessage("共有データは取得しましたが、画面に反映できるデータがありません");
         } else {
           setMessage(`共有データを反映しました：${appliedCount}件`);
         }
