@@ -92,6 +92,25 @@
       opacity: 0.9;
     }
 
+    .date-tools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .date-btn {
+      min-height: 32px;
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+      cursor: pointer;
+      padding: 4px 10px;
+      font-weight: 800;
+    }
+
     .practitioners {
       display: flex;
       gap: 8px;
@@ -507,7 +526,11 @@
     <section class="schedule" aria-label="予約枠エリア">
       <div class="topbar">
         <h1 class="title">既存患者 SOAPカルテメモ</h1>
-        <div id="todayLabel" class="date-label"></div>
+        <div class="date-tools">
+          <div id="todayLabel" class="date-label"></div>
+          <button id="prevDateBtn" class="date-btn" type="button">前日</button>
+          <button id="todayDateBtn" class="date-btn" type="button">今日に戻る</button>
+        </div>
       </div>
       <div id="practitioners" class="practitioners" aria-label="施術者切り替え"></div>
       <div id="timeline" class="timeline" aria-label="15分予約枠"></div>
@@ -525,6 +548,8 @@
             <div class="actions">
               <button id="generateBtn" class="btn" type="button">SOAP生成</button>
               <button id="copyBtn" class="btn secondary" type="button">コピー</button>
+              <button id="cloudSaveBtn" class="btn secondary" type="button">クラウド保存</button>
+              <button id="cloudReloadBtn" class="btn secondary" type="button">共有データを更新</button>
               <button id="clearSlotBtn" class="btn secondary" type="button">選択枠をクリア</button>
               <button id="clearAllBtn" class="btn danger" type="button">全枠クリア</button>
             </div>
@@ -638,6 +663,7 @@
 
   <script>
     const storageKey = "karteMemoSoap.v1";
+    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyPeaL6pDXfFIbFfEHZWugyKCHWiXxJb5YDx5LHn4v-UAXnIGsqaH3XwWWPtW8vsF-F/exec";
     const practitioners = [
       { id: "p1", name: "施術者1" },
       { id: "p2", name: "施術者2" },
@@ -667,11 +693,13 @@
       "運動痛": "関節・方向・角度",
       "自律神経症状の疑い（めまい・耳鳴り・気持ち悪さ・緊張痛）": "詳細"
     };
-    const todayKey = new Date().toLocaleDateString("sv-SE");
+    const todayKey = getTodayKey();
+    let activeDateKey = getInitialActiveDateKey();
     const state = loadState();
     let selectedPractitioner = "p1";
     let selectedTime = "09:00";
     let messageTimer = null;
+    let cloudSaveTimer = null;
     let pelvicInputTarget = "prev";
 
     const fields = {
@@ -749,6 +777,48 @@
       return groups;
     }
 
+    function getTodayKey() {
+      return new Date().toLocaleDateString("sv-SE");
+    }
+
+    function isBeforeClinicStart() {
+      const now = new Date();
+      return now.getHours() < 9;
+    }
+
+    function getPreviousDateKey(dateKey) {
+      const date = new Date(`${dateKey}T00:00:00`);
+      date.setDate(date.getDate() - 1);
+      return date.toLocaleDateString("sv-SE");
+    }
+
+    function getInitialActiveDateKey() {
+      const key = getTodayKey();
+      return isBeforeClinicStart() ? getPreviousDateKey(key) : key;
+    }
+
+    function setActiveDateKey(dateKey) {
+      if (dateKey === activeDateKey) {
+        updateDateLabel();
+        return;
+      }
+      const previousPractitioner = selectedPractitioner;
+      const previousTime = selectedTime;
+      saveCurrentSlot();
+      saveCloudSlotNow(previousPractitioner, previousTime, activeDateKey);
+      activeDateKey = dateKey;
+      loadSlot(selectedTime);
+      renderTimeline();
+      updateDateLabel();
+    }
+
+    function updateDateLabel() {
+      const label = document.getElementById("todayLabel");
+      const previousKey = getPreviousDateKey(todayKey);
+      const note = isBeforeClinicStart() && activeDateKey === previousKey ? "（前日分を表示中）" : "";
+      label.textContent = `表示日：${activeDateKey}${note}`;
+    }
+
     function loadState() {
       try {
         const saved = localStorage.getItem(storageKey);
@@ -762,11 +832,154 @@
       localStorage.setItem(storageKey, JSON.stringify(state));
     }
 
-    function ensureSlot(practitionerId, time) {
-      if (!state[todayKey]) state[todayKey] = {};
-      if (!state[todayKey][practitionerId]) state[todayKey][practitionerId] = {};
-      if (!state[todayKey][practitionerId][time]) state[todayKey][practitionerId][time] = blankSlot();
-      const slot = state[todayKey][practitionerId][time];
+    function getPractitionerName(practitionerId) {
+      const practitioner = practitioners.find((item) => item.id === practitionerId);
+      return practitioner ? practitioner.name : practitionerId;
+    }
+
+    function cancelCloudSave() {
+      clearTimeout(cloudSaveTimer);
+      cloudSaveTimer = null;
+    }
+
+    function scheduleCloudSave() {
+      cancelCloudSave();
+      const saveDateKey = activeDateKey;
+      const practitionerId = selectedPractitioner;
+      const time = selectedTime;
+      cloudSaveTimer = setTimeout(() => {
+        saveCloudSlotNow(practitionerId, time, saveDateKey);
+      }, 1500);
+    }
+
+    function buildCloudSaveRequest(practitionerId, time, dateKey = activeDateKey) {
+      const slot = ensureSlot(practitionerId, time, dateKey);
+      return {
+        action: "saveMemo",
+        date: dateKey,
+        practitioner_id: practitionerId,
+        practitioner_name: getPractitionerName(practitionerId),
+        time_slot: time,
+        updated_by: navigator.userAgent,
+        is_filled: isFilled(slot),
+        payload: slot
+      };
+    }
+
+    async function postGas(data) {
+      try {
+        console.log("GAS送信", data);
+        const response = await fetch(GAS_WEB_APP_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(data)
+        });
+        console.log("GAS status", response.status);
+        const text = await response.text();
+        console.log("GAS応答", text);
+        if (!response.ok) throw new Error(`GAS ${response.status}`);
+        let result;
+        try {
+          result = text ? JSON.parse(text) : {};
+        } catch (error) {
+          throw new Error("GAS応答がJSONではありません: " + text);
+        }
+        if (result.success === false) throw new Error(result.message || "GAS処理失敗");
+        return result;
+      } catch (error) {
+        console.error(error);
+        throw error;
+      }
+    }
+
+    async function saveCloudSlotNow(practitionerId = selectedPractitioner, time = selectedTime, dateKey = activeDateKey) {
+      cancelCloudSave();
+      const slot = ensureSlot(practitionerId, time, dateKey);
+      setMessage("保存中...");
+      try {
+        const result = await postGas(buildCloudSaveRequest(practitionerId, time, dateKey));
+        if (result.updated_at || result.version) {
+          slot.cloudMeta = {
+            updated_at: result.updated_at || "",
+            version: result.version || ""
+          };
+          persistState();
+        }
+        setMessage("クラウド保存済み");
+        return true;
+      } catch (error) {
+        setMessage(error.message || "未同期：通信失敗");
+        return false;
+      }
+    }
+
+    function getCloudRows(result) {
+      if (Array.isArray(result)) return result;
+      return result.memos || result.rows || result.data || [];
+    }
+
+    function parseCloudPayload(payload) {
+      if (!payload) return null;
+      if (typeof payload === "string") {
+        try {
+          return JSON.parse(payload);
+        } catch (error) {
+          return null;
+        }
+      }
+      return payload;
+    }
+
+    async function reloadCloudMemos() {
+      cancelCloudSave();
+      setMessage("保存中...");
+      try {
+        const result = await postGas({ action: "loadMemos", date: activeDateKey });
+        getCloudRows(result).forEach((row) => {
+          const practitionerId = row.practitioner_id || row.practitionerId;
+          const time = row.time_slot || row.timeSlot || row.time;
+          const payload = parseCloudPayload(row.payload);
+          if (!practitioners.some((item) => item.id === practitionerId) || !time || !payload) return;
+          if (!state[activeDateKey]) state[activeDateKey] = {};
+          if (!state[activeDateKey][practitionerId]) state[activeDateKey][practitionerId] = {};
+          state[activeDateKey][practitionerId][time] = Object.assign(blankSlot(), payload);
+          if (row.updated_at || row.version) {
+            state[activeDateKey][practitionerId][time].cloudMeta = {
+              updated_at: row.updated_at || "",
+              version: row.version || ""
+            };
+          }
+          ensureSlot(practitionerId, time);
+        });
+        persistState();
+        loadSlot(selectedTime);
+        renderTimeline();
+        setMessage("クラウド再読み込み完了");
+      } catch (error) {
+        setMessage(error.message || "クラウド再読み込み失敗");
+      }
+    }
+
+    async function clearCloudSlot(practitionerId, time, dateKey = activeDateKey) {
+      try {
+        await postGas({
+          action: "clearMemo",
+          date: dateKey,
+          practitioner_id: practitionerId,
+          practitioner_name: getPractitionerName(practitionerId),
+          time_slot: time,
+          updated_by: navigator.userAgent
+        });
+      } catch (error) {
+        setMessage("未同期：通信失敗");
+      }
+    }
+
+    function ensureSlot(practitionerId, time, dateKey = activeDateKey) {
+      if (!state[dateKey]) state[dateKey] = {};
+      if (!state[dateKey][practitionerId]) state[dateKey][practitionerId] = {};
+      if (!state[dateKey][practitionerId][time]) state[dateKey][practitionerId][time] = blankSlot();
+      const slot = state[dateKey][practitionerId][time];
       if (!slot.s) slot.s = blankSlot().s;
       if (!slot.o) slot.o = blankSlot().o;
       if (!slot.oNotes || typeof slot.oNotes !== "object" || Array.isArray(slot.oNotes)) slot.oNotes = {};
@@ -1207,7 +1420,7 @@
       });
     }
 
-    function saveCurrentSlot() {
+    function saveCurrentSlot(options = {}) {
       const slot = ensureSlot(selectedPractitioner, selectedTime);
       slot.s.part = getChoiceValues("sPart");
       slot.s.partDetails = getPartDetails();
@@ -1238,6 +1451,7 @@
       slot.p.nextMemo = fields.pNextMemo.value;
       slot.output = fields.soapOutput.value;
       persistState();
+      if (!options.skipCloud) scheduleCloudSave();
     }
 
     function loadSlot(time) {
@@ -1275,7 +1489,10 @@
     }
 
     function selectTime(time) {
+      const previousPractitioner = selectedPractitioner;
+      const previousTime = selectedTime;
       saveCurrentSlot();
+      saveCloudSlotNow(previousPractitioner, previousTime);
       selectedTime = time;
       loadSlot(time);
       renderTimeline();
@@ -1283,7 +1500,10 @@
 
     function selectPractitioner(practitionerId) {
       if (practitionerId === selectedPractitioner) return;
+      const previousPractitioner = selectedPractitioner;
+      const previousTime = selectedTime;
       saveCurrentSlot();
+      saveCloudSlotNow(previousPractitioner, previousTime);
       selectedPractitioner = practitionerId;
       selectedTime = "09:00";
       loadSlot(selectedTime);
@@ -1308,6 +1528,7 @@
       updateCounter();
       renderTimeline();
       setMessage("SOAPを生成しました");
+      saveCloudSlotNow(selectedPractitioner, selectedTime);
     }
 
     function buildSubjective(slot) {
@@ -1475,8 +1696,10 @@
 
     function clearSelectedSlot() {
       if (!confirm("本当にクリアして良いですか？")) return;
-      state[todayKey][selectedPractitioner][selectedTime] = blankSlot();
+      cancelCloudSave();
+      state[activeDateKey][selectedPractitioner][selectedTime] = blankSlot();
       persistState();
+      clearCloudSlot(selectedPractitioner, selectedTime, activeDateKey);
       loadSlot(selectedTime);
       renderTimeline();
       setMessage("選択枠をクリアしました");
@@ -1484,9 +1707,10 @@
 
     function clearAllSlots() {
       if (!confirm("本当にクリアして良いですか？")) return;
+      cancelCloudSave();
       createTimes().forEach((time) => {
         ensureSlot(selectedPractitioner, time);
-        state[todayKey][selectedPractitioner][time] = blankSlot();
+        state[activeDateKey][selectedPractitioner][time] = blankSlot();
       });
       persistState();
       loadSlot(selectedTime);
@@ -1512,6 +1736,17 @@
       });
       document.getElementById("generateBtn").addEventListener("click", generateSoap);
       document.getElementById("copyBtn").addEventListener("click", copySoap);
+      document.getElementById("cloudSaveBtn").addEventListener("click", () => {
+        saveCurrentSlot();
+        saveCloudSlotNow(selectedPractitioner, selectedTime);
+      });
+      document.getElementById("cloudReloadBtn").addEventListener("click", reloadCloudMemos);
+      document.getElementById("prevDateBtn").addEventListener("click", () => {
+        setActiveDateKey(getPreviousDateKey(activeDateKey));
+      });
+      document.getElementById("todayDateBtn").addEventListener("click", () => {
+        setActiveDateKey(todayKey);
+      });
       document.getElementById("clearSlotBtn").addEventListener("click", clearSelectedSlot);
       document.getElementById("clearAllBtn").addEventListener("click", clearAllSlots);
       fields.pelvicPrev.addEventListener("click", () => {
@@ -1525,7 +1760,7 @@
     }
 
     function init() {
-      document.getElementById("todayLabel").textContent = `保存日：${todayKey}`;
+      updateDateLabel();
       renderChoiceGroups();
       renderFindings();
       fillEmsCurrentOptions();
