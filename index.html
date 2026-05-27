@@ -915,33 +915,70 @@
 
     function getCloudRows(result) {
       if (Array.isArray(result)) return result;
-      return result.memos || result.rows || result.data || [];
+      if (Array.isArray(result.memos)) return result.memos;
+      if (Array.isArray(result.rows)) return result.rows;
+      if (Array.isArray(result.data)) return result.data;
+      return [];
     }
 
     function parseCloudPayload(payload) {
       if (!payload) return null;
+
       if (typeof payload === "string") {
         try {
           return JSON.parse(payload);
         } catch (error) {
+          console.error("payload JSON parse error", error, payload);
           return null;
         }
       }
-      return payload;
+
+      if (typeof payload === "object") {
+        return payload;
+      }
+
+      return null;
     }
 
     async function reloadCloudMemos() {
       cancelCloudSave();
-      setMessage("保存中...");
+      setMessage("共有データを更新中...");
       try {
-        const result = await postGas({ action: "loadMemos", date: activeDateKey });
-        getCloudRows(result).forEach((row) => {
+        console.log("共有更新 activeDateKey", activeDateKey);
+        const result = await postGas({
+          action: "loadMemos",
+          date: activeDateKey
+        });
+        console.log("共有更新 result", result);
+        const rows = getCloudRows(result);
+        console.log("共有更新 rows", rows);
+
+        if (!Array.isArray(rows) || rows.length === 0) {
+          setMessage("共有データなし：表示日を確認してください");
+          return;
+        }
+
+        if (!state[activeDateKey]) state[activeDateKey] = {};
+
+        let appliedCount = 0;
+        rows.forEach((row) => {
+          console.log("共有更新 row", row);
           const practitionerId = row.practitioner_id || row.practitionerId;
           const time = row.time_slot || row.timeSlot || row.time;
-          const payload = parseCloudPayload(row.payload);
-          if (!practitioners.some((item) => item.id === practitionerId) || !time || !payload) return;
-          if (!state[activeDateKey]) state[activeDateKey] = {};
+          const payload = parseCloudPayload(row.payload || row.payload_json || row.payloadJson);
+
+          if (!practitionerId || !time || !payload) {
+            console.warn("共有更新 skipped", row);
+            return;
+          }
+
+          if (!practitioners.some((item) => item.id === practitionerId)) {
+            console.warn("未知の施術者ID", practitionerId);
+            return;
+          }
+
           if (!state[activeDateKey][practitionerId]) state[activeDateKey][practitionerId] = {};
+          console.log("反映先", activeDateKey, practitionerId, time);
           state[activeDateKey][practitionerId][time] = Object.assign(blankSlot(), payload);
           if (row.updated_at || row.version) {
             state[activeDateKey][practitionerId][time].cloudMeta = {
@@ -950,13 +987,19 @@
             };
           }
           ensureSlot(practitionerId, time);
+          appliedCount += 1;
         });
         persistState();
         loadSlot(selectedTime);
         renderTimeline();
-        setMessage("クラウド再読み込み完了");
+        if (appliedCount === 0) {
+          setMessage("共有データは取得しましたが、反映対象がありません");
+        } else {
+          setMessage(`共有データを更新しました：${appliedCount}件`);
+        }
       } catch (error) {
-        setMessage(error.message || "クラウド再読み込み失敗");
+        console.error("共有データ更新エラー", error);
+        setMessage(`共有データ更新失敗：${error.message}`);
       }
     }
 
