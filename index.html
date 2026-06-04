@@ -472,6 +472,40 @@
       color: #fff;
     }
 
+    .patient-panel {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 10px;
+      padding: 10px;
+      border: 1px solid #cbb8dc;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    .patient-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .patient-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: end;
+    }
+
+    .patient-row .btn {
+      min-width: 112px;
+      min-height: 42px;
+    }
+
+    .patient-name {
+      min-height: 24px;
+      color: var(--primary-dark);
+      font-weight: 900;
+    }
+
     .output {
       min-height: 180px;
       font-family: "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
@@ -552,6 +586,17 @@
               <button id="cloudReloadBtn" class="btn secondary" type="button">共有データを更新</button>
               <button id="clearSlotBtn" class="btn secondary" type="button">選択枠をクリア</button>
               <button id="clearAllBtn" class="btn danger" type="button">全枠クリア</button>
+            </div>
+            <div class="patient-panel" aria-label="患者情報">
+              <h3 class="patient-title">患者情報</h3>
+              <div class="patient-row">
+                <div>
+                  <label for="karteNoInput">カルテ番号</label>
+                  <input id="karteNoInput" type="text" inputmode="numeric" autocomplete="off">
+                </div>
+                <button id="patientLookupBtn" class="btn secondary" type="button">患者確認</button>
+              </div>
+              <div id="patientNameDisplay" class="patient-name">患者名：未確認</div>
             </div>
             <label for="soapOutput">生成文</label>
             <textarea id="soapOutput" class="output" placeholder="SOAP生成ボタンで文章を作成します"></textarea>
@@ -710,6 +755,7 @@
       pTreatmentMemo: document.getElementById("pTreatmentMemo"),
       pGuidanceMemo: document.getElementById("pGuidanceMemo"),
       pNextMemo: document.getElementById("pNextMemo"),
+      karteNoInput: document.getElementById("karteNoInput"),
       soapOutput: document.getElementById("soapOutput")
     };
 
@@ -749,6 +795,10 @@
           guidanceMemo: "",
           next: [],
           nextMemo: ""
+        },
+        patient: {
+          karteNo: "",
+          patientName: ""
         },
         output: ""
       };
@@ -862,6 +912,7 @@
         time_slot: time,
         updated_by: navigator.userAgent,
         is_filled: isFilled(slot),
+        karteNo: slot.patient?.karteNo || "",
         payload: slot
       };
     }
@@ -1000,6 +1051,7 @@
         hasCloudValue(payload.treatmentParts) ||
         hasCloudValue(payload.burden) ||
         hasCloudValue(payload.eventMemo) ||
+        hasCloudValue(payload.patient) ||
         payload.output && String(payload.output).trim() ||
         payload.s && (
           hasCloudValue(payload.s.part) ||
@@ -1120,7 +1172,26 @@
           });
 
           if (isDeleted) {
-            console.warn("共有更新 skipped deleted row", row);
+            if (practitionerId && timeSlot && practitioners.some((item) => item.id === practitionerId)) {
+              if (!state[activeDateKey]) state[activeDateKey] = {};
+              if (!state[activeDateKey][practitionerId]) state[activeDateKey][practitionerId] = {};
+              state[activeDateKey][practitionerId][timeSlot] = blankSlot();
+
+              const updatedAt = getCloudRowValue(row, ["updated_at", "updatedAt"], 6);
+              const version = getCloudRowValue(row, ["version"], 8);
+              if (updatedAt || version) {
+                state[activeDateKey][practitionerId][timeSlot].cloudMeta = {
+                  updated_at: updatedAt || "",
+                  version: version || ""
+                };
+              }
+
+              appliedCount += 1;
+              console.log("共有更新 deleted applied", activeDateKey, practitionerId, timeSlot);
+              console.log("cloud applied count", appliedCount);
+            } else {
+              console.warn("共有更新 skipped deleted row", row);
+            }
             return;
           }
 
@@ -1195,6 +1266,11 @@
       if (!slot.oNotes || typeof slot.oNotes !== "object" || Array.isArray(slot.oNotes)) slot.oNotes = {};
       if (!slot.p) slot.p = blankSlot().p;
       if (!slot.additionalDetails) slot.additionalDetails = blankSlot().additionalDetails;
+      if (!slot.patient || typeof slot.patient !== "object" || Array.isArray(slot.patient)) {
+        slot.patient = { karteNo: "", patientName: "" };
+      }
+      if (typeof slot.patient.karteNo !== "string") slot.patient.karteNo = "";
+      if (typeof slot.patient.patientName !== "string") slot.patient.patientName = "";
       normalizeSlot(slot);
       findings.forEach((name) => {
         if (!slot.o[name]) slot.o[name] = "なし";
@@ -1292,6 +1368,8 @@
         slot.p.guidanceMemo.trim() ||
         slot.p.next.length ||
         slot.p.nextMemo.trim() ||
+        slot.patient.karteNo.trim() ||
+        slot.patient.patientName.trim() ||
         slot.output.trim()
       );
     }
@@ -1318,6 +1396,57 @@
       messageTimer = setTimeout(() => {
         status.textContent = "";
       }, 2400);
+    }
+
+    function updatePatientNameDisplay(patientName, options = {}) {
+      const display = document.getElementById("patientNameDisplay");
+      if (options.notFound) {
+        display.textContent = "患者名：該当患者なし";
+        return;
+      }
+      const name = patientName ? String(patientName).trim() : "";
+      display.textContent = name ? `患者名：${name} 様` : "患者名：未確認";
+    }
+
+    async function lookupPatient() {
+      const karteNo = fields.karteNoInput.value.trim();
+      if (!karteNo) {
+        setMessage("カルテ番号を入力してください");
+        return;
+      }
+
+      const slot = ensureSlot(selectedPractitioner, selectedTime);
+      slot.patient.karteNo = karteNo;
+      setMessage("患者確認中...");
+      try {
+        const result = await postGas({
+          action: "lookupPatient",
+          karteNo
+        });
+        if (result.found) {
+          const patientName = result.patientName || "";
+          slot.patient.karteNo = result.karteNo || karteNo;
+          slot.patient.patientName = patientName;
+          fields.karteNoInput.value = slot.patient.karteNo;
+          updatePatientNameDisplay(patientName);
+          persistState();
+          renderTimeline();
+          await saveCloudSlotNow(selectedPractitioner, selectedTime);
+          setMessage("患者確認しました");
+        } else {
+          slot.patient.karteNo = result.karteNo || karteNo;
+          slot.patient.patientName = "";
+          fields.karteNoInput.value = slot.patient.karteNo;
+          updatePatientNameDisplay("", { notFound: true });
+          persistState();
+          renderTimeline();
+          await saveCloudSlotNow(selectedPractitioner, selectedTime);
+          setMessage("該当患者なし");
+        }
+      } catch (error) {
+        console.error("患者確認エラー", error);
+        setMessage(`患者確認失敗：${error.message}`);
+      }
     }
 
     function renderPractitioners() {
@@ -1644,6 +1773,12 @@
       slot.s.change = getChoiceValues("sChange");
       slot.s.request = getChoiceValues("sRequest");
       slot.s.memo = fields.sMemo.value;
+      const karteNo = fields.karteNoInput.value.trim();
+      if (slot.patient.karteNo !== karteNo) {
+        slot.patient.patientName = "";
+        updatePatientNameDisplay("");
+      }
+      slot.patient.karteNo = karteNo;
       slot.additionalTreatments = getChoiceValues("additionalTreatments");
       slot.additionalDetails.moreCount = slot.additionalTreatments.includes("MORE") ? getChoiceValues("moreCount") : "";
       slot.additionalDetails.pelvicPrev = slot.additionalTreatments.includes("骨盤") ? fields.pelvicPrev.value : "";
@@ -1696,6 +1831,8 @@
       fields.pGuidanceMemo.value = slot.p.guidanceMemo;
       setChoiceValues("pNext", slot.p.next);
       fields.pNextMemo.value = slot.p.nextMemo;
+      fields.karteNoInput.value = slot.patient.karteNo || "";
+      updatePatientNameDisplay(slot.patient.patientName || "");
       fields.soapOutput.value = slot.output;
       updateSelectedLabel();
       updateCounter();
@@ -1949,6 +2086,7 @@
       });
       document.getElementById("generateBtn").addEventListener("click", generateSoap);
       document.getElementById("copyBtn").addEventListener("click", copySoap);
+      document.getElementById("patientLookupBtn").addEventListener("click", lookupPatient);
       document.getElementById("cloudSaveBtn").addEventListener("click", () => {
         saveCurrentSlot();
         saveCloudSlotNow(selectedPractitioner, selectedTime);
