@@ -810,9 +810,6 @@
     };
     const todayKey = getTodayKey();
     const IDLE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-    const ACTIVE_REFRESH_INTERVAL_MS = 5000;
-    const ACTIVE_REFRESH_DURATION_MS = 3 * 60 * 1000;
-    const INTERACTION_REFRESH_THROTTLE_MS = 1500;
     const PATIENT_LOOKUP_DEBOUNCE_MS = 400;
     let activeDateKey = getInitialActiveDateKey();
     const state = loadState();
@@ -820,13 +817,12 @@
     let selectedTime = "09:00";
     let messageTimer = null;
     let cloudSaveTimer = null;
+    let cloudSaveKey = "";
     let idleRefreshTimer = null;
-    let activeRefreshTimer = null;
-    let activeRefreshUntil = 0;
-    let lastInteractionRefreshAt = 0;
     let isSaving = false;
     let isRefreshing = false;
     let pendingRefreshOptions = null;
+    const dirtySlotKeys = new Set();
     let patientLookupTimer = null;
     let isPatientLookupRunning = false;
     let runningPatientLookupKarteNo = "";
@@ -982,6 +978,14 @@
       return getSlotKey(activeDateKey, selectedPractitioner, selectedTime);
     }
 
+    function markSlotDirty(dateKey, practitionerId, time) {
+      dirtySlotKeys.add(getSlotKey(dateKey, practitionerId, time));
+    }
+
+    function markSlotClean(dateKey, practitionerId, time) {
+      dirtySlotKeys.delete(getSlotKey(dateKey, practitionerId, time));
+    }
+
     function getEventSlotKey(target) {
       const slotButton = target && target.closest ? target.closest(".slot") : null;
       if (slotButton && slotButton.dataset.time) {
@@ -1039,6 +1043,7 @@
     function cancelCloudSave() {
       clearTimeout(cloudSaveTimer);
       cloudSaveTimer = null;
+      cloudSaveKey = "";
     }
 
     function scheduleCloudSave() {
@@ -1046,6 +1051,7 @@
       const saveDateKey = activeDateKey;
       const practitionerId = selectedPractitioner;
       const time = selectedTime;
+      cloudSaveKey = getSlotKey(saveDateKey, practitionerId, time);
       cloudSaveTimer = setTimeout(() => {
         saveCloudSlotNow(practitionerId, time, saveDateKey);
       }, 1500);
@@ -1094,6 +1100,7 @@
 
     async function saveCloudSlotNow(practitionerId = selectedPractitioner, time = selectedTime, dateKey = activeDateKey) {
       await waitForRefreshToFinish();
+      const savingSlotKey = getSlotKey(dateKey, practitionerId, time);
       cancelCloudSave();
       const slot = ensureSlot(practitionerId, time, dateKey);
       isSaving = true;
@@ -1108,6 +1115,7 @@
           persistState();
         }
         setMessage("クラウド保存済み");
+        if (cloudSaveKey !== savingSlotKey) markSlotClean(dateKey, practitionerId, time);
         return true;
       } catch (error) {
         setMessage(error.message || "未同期：通信失敗");
@@ -1280,8 +1288,10 @@
     }
 
     function shouldSkipCloudApply(practitionerId, timeSlot, options) {
-      if (!options || !options.excludedSlotKeys || !practitionerId || !timeSlot) return false;
-      return options.excludedSlotKeys.has(getSlotKey(activeDateKey, practitionerId, timeSlot));
+      if (!practitionerId || !timeSlot) return false;
+      const slotKey = getSlotKey(activeDateKey, practitionerId, timeSlot);
+      if (dirtySlotKeys.has(slotKey)) return true;
+      return Boolean(options && options.excludedSlotKeys && options.excludedSlotKeys.has(slotKey));
     }
 
     function serializeSlotForCompare(slot) {
@@ -1426,7 +1436,12 @@
         console.log("cloud skipped editing count", skippedEditingCount);
         if (!isAuto || changedCount > 0) {
           persistState();
-          if (!(isAuto && options.excludedSlotKeys && options.excludedSlotKeys.has(getCurrentSlotKey()))) {
+          const currentSlotKey = getCurrentSlotKey();
+          const currentSlotProtected = isAuto && (
+            dirtySlotKeys.has(currentSlotKey) ||
+            options.excludedSlotKeys && options.excludedSlotKeys.has(currentSlotKey)
+          );
+          if (!currentSlotProtected) {
             loadSlot(selectedTime);
           }
           renderTimeline();
@@ -1461,6 +1476,7 @@
           time_slot: time,
           updated_by: navigator.userAgent
         });
+        markSlotClean(dateKey, practitionerId, time);
       } catch (error) {
         setMessage("未同期：通信失敗");
       } finally {
@@ -1612,9 +1628,14 @@
     }
 
     function createAutoRefreshOptions(mode, target = document.activeElement) {
+      const excludedSlotKeys = getEditingSlotKeys(target);
+      if (mode === "interaction") {
+        excludedSlotKeys.add(getEventSlotKey(target));
+        excludedSlotKeys.add(getCurrentSlotKey());
+      }
       return {
         mode,
-        excludedSlotKeys: mode === "interaction" ? new Set() : getEditingSlotKeys(target)
+        excludedSlotKeys
       };
     }
 
@@ -1634,48 +1655,6 @@
       if (!idleRefreshTimer) return;
       clearInterval(idleRefreshTimer);
       idleRefreshTimer = null;
-    }
-
-    function stopActiveRefreshTimer() {
-      if (!activeRefreshTimer) return;
-      clearInterval(activeRefreshTimer);
-      activeRefreshTimer = null;
-      activeRefreshUntil = 0;
-      console.log("shared active refresh timer stopped");
-      startIdleRefreshTimer();
-    }
-
-    function startActiveRefreshTimer() {
-      activeRefreshUntil = Date.now() + ACTIVE_REFRESH_DURATION_MS;
-      stopIdleRefreshTimer();
-      if (activeRefreshTimer) {
-        console.log("shared active refresh timer extended", activeRefreshUntil);
-        return;
-      }
-      activeRefreshTimer = setInterval(() => {
-        if (Date.now() > activeRefreshUntil) {
-          stopActiveRefreshTimer();
-          return;
-        }
-        requestAutoRefresh("active");
-      }, ACTIVE_REFRESH_INTERVAL_MS);
-      console.log("shared active refresh timer started", ACTIVE_REFRESH_INTERVAL_MS);
-    }
-
-    function isSharedRefreshInteractionTarget(target) {
-      if (!target || !target.closest) return false;
-      if (target.closest("#cloudReloadBtn, #cloudSaveBtn, #clearSlotBtn, #clearAllBtn")) return false;
-      if (target.closest("#karteNoInput")) return false;
-      return Boolean(target.closest(".slot, input, textarea, select, .choice, .pelvic-display, .number-pad button"));
-    }
-
-    function handleSharedRefreshInteraction(event) {
-      if (!isSharedRefreshInteractionTarget(event.target)) return;
-      startActiveRefreshTimer();
-      const now = Date.now();
-      if (now - lastInteractionRefreshAt < INTERACTION_REFRESH_THROTTLE_MS) return;
-      lastInteractionRefreshAt = now;
-      requestAutoRefresh("interaction", event.target);
     }
 
     function normalizeKarteNo(value) {
@@ -2130,6 +2109,7 @@
 
     function saveCurrentSlot(options = {}) {
       const slot = ensureSlot(selectedPractitioner, selectedTime);
+      markSlotDirty(activeDateKey, selectedPractitioner, selectedTime);
       slot.s.part = getChoiceValues("sPart");
       slot.s.partDetails = getPartDetails();
       slot.s.fingerDetails = getFingerDetails();
@@ -2413,6 +2393,7 @@
     function clearSelectedSlot() {
       if (!confirm("本当にクリアして良いですか？")) return;
       cancelCloudSave();
+      markSlotDirty(activeDateKey, selectedPractitioner, selectedTime);
       state[activeDateKey][selectedPractitioner][selectedTime] = blankSlot();
       persistState();
       clearCloudSlot(selectedPractitioner, selectedTime, activeDateKey);
@@ -2479,7 +2460,6 @@
         pelvicInputTarget = "current";
         updatePelvicDisplays();
       });
-      document.querySelector(".app").addEventListener("pointerdown", handleSharedRefreshInteraction, true);
     }
 
     function init() {
