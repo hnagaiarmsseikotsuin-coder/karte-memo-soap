@@ -191,9 +191,21 @@
       color: #697480;
     }
 
+    .slot.subjective {
+      border-color: #9bc8a3;
+      background: #e6f4ea;
+      color: var(--text);
+    }
+
     .slot.done.selected {
       border-color: var(--primary);
       background: linear-gradient(180deg, var(--selected), #d7dce1);
+      color: var(--text);
+    }
+
+    .slot.subjective.selected {
+      border-color: var(--primary);
+      background: linear-gradient(180deg, var(--selected), #e6f4ea);
       color: var(--text);
     }
 
@@ -1618,6 +1630,26 @@
       );
     }
 
+    function hasSubjectiveProgressInput(slot) {
+      return Boolean(
+        slot.s.part.length ||
+        Object.keys(slot.s.partDetails).length ||
+        slot.s.fingers.length ||
+        Object.values(slot.s.fingerDetails).some((items) => Array.isArray(items) && items.length) ||
+        slot.s.condition.length ||
+        Object.keys(slot.s.conditionLevels).length ||
+        slot.s.change ||
+        slot.s.request.length ||
+        slot.s.memo.trim() ||
+        slot.additionalTreatments.length ||
+        slot.additionalDetails.moreCount ||
+        slot.additionalDetails.pelvicPrev ||
+        slot.additionalDetails.pelvicCurrent ||
+        slot.additionalDetails.emsMode ||
+        slot.additionalDetails.emsCurrent
+      );
+    }
+
     function setMessage(text) {
       const status = document.getElementById("status");
       status.textContent = text;
@@ -1819,10 +1851,12 @@
         group.times.forEach((time) => {
           const slot = ensureSlot(selectedPractitioner, time);
           const filled = isFilled(slot);
+          const hasSubjectiveProgress = hasSubjectiveProgressInput(slot);
+          const hasObjectiveOrPlanProgress = hasActiveFindings(slot) || hasPlanInput(slot);
           console.log("timeline time", time, "filled", filled, "slot", slot);
           const button = document.createElement("button");
           button.type = "button";
-          button.className = `slot${filled ? " done" : ""}${time === selectedTime ? " selected" : ""}`;
+          button.className = `slot${hasObjectiveOrPlanProgress ? " done" : ""}${!hasObjectiveOrPlanProgress && hasSubjectiveProgress ? " subjective" : ""}${time === selectedTime ? " selected" : ""}`;
           button.dataset.time = time;
           const timeLabel = document.createElement("span");
           timeLabel.className = "slot-time";
