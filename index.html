@@ -949,11 +949,16 @@
       }
       const previousPractitioner = selectedPractitioner;
       const previousTime = selectedTime;
-      saveCurrentSlot();
-      saveCloudSlotNow(previousPractitioner, previousTime, activeDateKey);
+      if (previousTime) {
+        saveCurrentSlot();
+        saveCloudSlotNow(previousPractitioner, previousTime, activeDateKey);
+      }
       activeDateKey = dateKey;
-      loadSlot(selectedTime);
+      if (selectedTime) {
+        loadSlot(selectedTime);
+      }
       renderTimeline();
+      updateSelectionState();
       updateDateLabel();
     }
 
@@ -987,7 +992,12 @@
     }
 
     function getCurrentSlotKey() {
+      if (!selectedTime) return "";
       return getSlotKey(activeDateKey, selectedPractitioner, selectedTime);
+    }
+
+    function hasSelectedSlot() {
+      return Boolean(selectedTime);
     }
 
     function markSlotDirty(dateKey, practitionerId, time) {
@@ -1059,6 +1069,7 @@
     }
 
     function scheduleCloudSave() {
+      if (!selectedTime) return;
       cancelCloudSave();
       const saveDateKey = activeDateKey;
       const practitionerId = selectedPractitioner;
@@ -1111,6 +1122,7 @@
     }
 
     async function saveCloudSlotNow(practitionerId = selectedPractitioner, time = selectedTime, dateKey = activeDateKey) {
+      if (!time) return false;
       await waitForRefreshToFinish();
       const savingSlotKey = getSlotKey(dateKey, practitionerId, time);
       cancelCloudSave();
@@ -1453,10 +1465,11 @@
             dirtySlotKeys.has(currentSlotKey) ||
             options.excludedSlotKeys && options.excludedSlotKeys.has(currentSlotKey)
           );
-          if (!currentSlotProtected) {
+          if (!currentSlotProtected && selectedTime) {
             loadSlot(selectedTime);
           }
           renderTimeline();
+          updateSelectionState();
         }
         if (isAuto && changedCount === 0) {
           console.log("共有更新 auto no visible changes");
@@ -1755,6 +1768,11 @@
     }
 
     async function lookupPatient(options = {}) {
+      if (!selectedTime) {
+        setMessage("時間枠を選択してください");
+        updateSelectionState();
+        return;
+      }
       const force = options.force === true;
       const source = options.source || "manual";
       const karteNo = normalizeKarteNo(fields.karteNoInput.value);
@@ -2000,6 +2018,11 @@
 
     function renderPartDetails(sourceSlot) {
       const container = document.getElementById("sPartDetailChoices");
+      if (!sourceSlot && !selectedTime) {
+        container.innerHTML = "";
+        container.classList.add("hidden");
+        return;
+      }
       const slot = sourceSlot || ensureSlot(selectedPractitioner, selectedTime);
       const selectedParts = getChoiceValues("sPart").filter((part) => part !== "前回と同じ" && part !== "その他");
       container.innerHTML = "";
@@ -2077,6 +2100,11 @@
 
     function renderConditionLevels(sourceSlot) {
       const container = document.getElementById("sConditionLevelChoices");
+      if (!sourceSlot && !selectedTime) {
+        container.innerHTML = "";
+        container.classList.add("hidden");
+        return;
+      }
       const slot = sourceSlot || ensureSlot(selectedPractitioner, selectedTime);
       const selectedConditions = getChoiceValues("sCondition").filter((condition) => condition !== "前回と同じ" && condition !== "その他");
       container.innerHTML = "";
@@ -2142,6 +2170,10 @@
     }
 
     function saveCurrentSlot(options = {}) {
+      if (!selectedTime) {
+        updateSelectionState();
+        return false;
+      }
       const slot = ensureSlot(selectedPractitioner, selectedTime);
       markSlotDirty(activeDateKey, selectedPractitioner, selectedTime);
       slot.s.part = getChoiceValues("sPart");
@@ -2180,6 +2212,7 @@
       slot.output = fields.soapOutput.value;
       persistState();
       if (!options.skipCloud) scheduleCloudSave();
+      return true;
     }
 
     function loadSlot(time) {
@@ -2216,35 +2249,47 @@
       fields.soapOutput.value = slot.output;
       updateSelectedLabel();
       updateCounter();
+      updateSelectionState();
     }
 
     function selectTime(time) {
       const previousPractitioner = selectedPractitioner;
       const previousTime = selectedTime;
-      saveCurrentSlot();
-      saveCloudSlotNow(previousPractitioner, previousTime);
+      if (previousTime) {
+        saveCurrentSlot();
+        saveCloudSlotNow(previousPractitioner, previousTime);
+      }
       selectedTime = time;
       loadSlot(time);
       renderTimeline();
+      updateSelectionState();
     }
 
     function selectPractitioner(practitionerId) {
       if (practitionerId === selectedPractitioner) return;
       const previousPractitioner = selectedPractitioner;
       const previousTime = selectedTime;
-      saveCurrentSlot();
-      saveCloudSlotNow(previousPractitioner, previousTime);
+      if (previousTime) {
+        saveCurrentSlot();
+        saveCloudSlotNow(previousPractitioner, previousTime);
+      }
       selectedPractitioner = practitionerId;
       selectedTime = "09:00";
       loadSlot(selectedTime);
       renderPractitioners();
       renderTimeline();
+      updateSelectionState();
     }
 
     function updateSelectedLabel() {
     }
 
     function generateSoap() {
+      if (!selectedTime) {
+        setMessage("時間枠を選択してください");
+        updateSelectionState();
+        return;
+      }
       saveCurrentSlot();
       const slot = ensureSlot(selectedPractitioner, selectedTime);
       const soap = [
@@ -2407,6 +2452,11 @@
     }
 
     async function copySoap() {
+      if (!selectedTime) {
+        setMessage("時間枠を選択してください");
+        updateSelectionState();
+        return;
+      }
       saveCurrentSlot();
       const text = fields.soapOutput.value.trim();
       if (!text) {
@@ -2425,6 +2475,11 @@
     }
 
     function clearSelectedSlot() {
+      if (!selectedTime) {
+        setMessage("時間枠を選択してください");
+        updateSelectionState();
+        return;
+      }
       if (!confirm("本当にクリアして良いですか？")) return;
       cancelCloudSave();
       markSlotDirty(activeDateKey, selectedPractitioner, selectedTime);
@@ -2444,13 +2499,99 @@
         state[activeDateKey][selectedPractitioner][time] = blankSlot();
       });
       persistState();
-      loadSlot(selectedTime);
+      if (selectedTime) loadSlot(selectedTime);
       renderTimeline();
+      updateSelectionState();
       setMessage("全枠をクリアしました");
     }
 
     function updateCounter() {
       document.getElementById("counter").textContent = `${fields.soapOutput.value.length}字`;
+    }
+
+    function updateSelectionState() {
+    }
+
+    function isSelectionControlTarget(target) {
+      if (!target || !target.closest) return false;
+      return Boolean(target.closest("button, input, textarea, select, label, .choice, .slot, .practitioner, .patient-name, .pelvic-display, .number-pad, a"));
+    }
+
+    function deselectCurrentSlot() {
+      if (!selectedTime) return;
+      const previousPractitioner = selectedPractitioner;
+      const previousTime = selectedTime;
+      const previousDateKey = activeDateKey;
+      saveCurrentSlot();
+      saveCloudSlotNow(previousPractitioner, previousTime, previousDateKey);
+      selectedTime = "";
+      renderTimeline();
+      updateSelectionState();
+      setMessage("時間枠の選択を解除しました");
+    }
+
+    function clearActiveChoicesInPanel(panel) {
+      panel.querySelectorAll(".choice.active").forEach((choice) => {
+        choice.classList.remove("active");
+      });
+    }
+
+    function getAdditionalTreatmentPanel() {
+      const container = document.getElementById("additionalTreatmentChoices");
+      return container ? container.closest(".panel") : null;
+    }
+
+    function getPlanPanel() {
+      const container = document.getElementById("pTreatmentChoices");
+      return container ? container.closest(".panel") : null;
+    }
+
+    function savePanelChoiceState() {
+      saveCurrentSlot();
+      renderTimeline();
+    }
+
+    function handlePanelBlankClick(panel, options = {}) {
+      if (!selectedTime) return;
+      clearActiveChoicesInPanel(panel);
+      if (options.renderSubjectiveDetails) {
+        renderPartDetails();
+        renderConditionLevels();
+      }
+      if (options.renderAdditionalDetails) {
+        renderAdditionalTreatmentDetails();
+      }
+      savePanelChoiceState();
+    }
+
+    function handleBlankAreaClick(event) {
+      const target = event.target;
+      if (!target || !target.closest || isSelectionControlTarget(target)) return;
+
+      if (target.closest(".schedule, .timeline")) {
+        deselectCurrentSlot();
+        return;
+      }
+
+      const additionalPanel = getAdditionalTreatmentPanel();
+      if (additionalPanel && additionalPanel.contains(target)) {
+        handlePanelBlankClick(additionalPanel, { renderAdditionalDetails: true });
+        return;
+      }
+
+      const planPanel = getPlanPanel();
+      if (planPanel && planPanel.contains(target)) {
+        handlePanelBlankClick(planPanel);
+        return;
+      }
+
+      const subjectivePanel = target.closest(".s-panel");
+      if (subjectivePanel) {
+        handlePanelBlankClick(subjectivePanel, { renderSubjectiveDetails: true });
+        return;
+      }
+
+      if (target.closest(".o-panel")) return;
     }
 
     function bindInputs() {
@@ -2474,6 +2615,11 @@
       fields.karteNoInput.addEventListener("keydown", handleKarteNoKeydown);
       document.getElementById("patientLookupBtn").addEventListener("click", () => lookupPatient({ force: true, source: "button" }));
       document.getElementById("cloudSaveBtn").addEventListener("click", () => {
+        if (!selectedTime) {
+          setMessage("時間枠を選択してください");
+          updateSelectionState();
+          return;
+        }
         saveCurrentSlot();
         saveCloudSlotNow(selectedPractitioner, selectedTime);
       });
@@ -2494,6 +2640,7 @@
         pelvicInputTarget = "current";
         updatePelvicDisplays();
       });
+      document.querySelector(".app").addEventListener("click", handleBlankAreaClick);
     }
 
     function init() {
