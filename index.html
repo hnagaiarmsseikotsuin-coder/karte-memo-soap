@@ -579,6 +579,10 @@
       color: var(--danger);
     }
 
+    .patient-type-choices {
+      margin-bottom: 0;
+    }
+
     @media (max-width: 820px) {
       .patient-name {
         font-size: 28px;
@@ -678,6 +682,7 @@
                   <span class="patient-btn-sub">Enterでも可</span>
                 </button>
                 <div id="patientNameDisplay" class="patient-name">患者名：未確認</div>
+                <div id="patientTypeChoices" class="choice-group patient-type-choices" aria-label="患者分類"></div>
               </div>
             </div>
             <label for="soapOutput">生成文</label>
@@ -801,13 +806,14 @@
       sPart: { container: "sPartChoices", values: ["前回と同じ", "頭", "首", "肩", "腕", "肘", "手首", "手の指", "背中", "腰", "骨盤", "股関節", "太もも", "膝", "ふくらはぎ", "足首", "足裏", "足の指", "その他"], multiple: true },
       sCondition: { container: "sConditionChoices", values: ["前回と同じ", "痛い", "重い", "張る", "だるい", "違和感", "しびれ", "動かしにくい", "その他"], multiple: true },
       sRequest: { container: "sRequestChoices", values: ["いつも通り", "重点確認", "軽め", "強め", "相談あり", "その他"], multiple: true },
-      additionalTreatments: { container: "additionalTreatmentChoices", values: ["MORE", "足リンパ", "骨盤", "ハイボル", "EMS", "小顔", "テーピング"], multiple: true },
+      additionalTreatments: { container: "additionalTreatmentChoices", values: ["MORE", "足リンパ", "骨盤", "ハイボル", "EMS", "小顔", "テーピング", "１症追加"], multiple: true },
       moreCount: { container: "moreCountChoices", values: ["1回", "2回", "3回"], multiple: false },
       emsMode: { container: "emsModeChoices", values: ["A：干渉波＋変調波 4K40 8K40", "B：干渉波＋変調波 F-1 F-2", "C：パルス波 4K40 8K40", "D：パルス波 F-5 F-6"], multiple: false },
       pTreatment: { container: "pTreatmentChoices", values: ["手技", "ストレッチ", "関節可動域訓練", "テーピング", "確認のみ", "その他"], multiple: true },
       pGuidance: { container: "pGuidanceChoices", values: ["姿勢", "歩行", "座位", "睡眠", "運動", "ストレッチ", "負担動作注意", "なし", "その他"], multiple: true },
       pNext: { container: "pNextChoices", values: ["同部位の変化", "症状レベル", "可動域", "負担動作", "施術反応", "通常通り", "その他"], multiple: true }
     };
+    choiceGroups.patientType = { container: "patientTypeChoices", values: ["新患", "再診"], multiple: false };
     const partSides = ["右", "左", "両方"];
     const fingers = ["親指", "人差し指", "中指", "薬指", "小指"];
     const conditionLevels = ["軽度：1〜3", "中等度：4〜7", "重度：8〜10"];
@@ -893,7 +899,8 @@
         },
         patient: {
           karteNo: "",
-          patientName: ""
+          patientName: "",
+          patientType: ""
         },
         output: ""
       };
@@ -1521,10 +1528,11 @@
       if (!slot.p) slot.p = blankSlot().p;
       if (!slot.additionalDetails) slot.additionalDetails = blankSlot().additionalDetails;
       if (!slot.patient || typeof slot.patient !== "object" || Array.isArray(slot.patient)) {
-        slot.patient = { karteNo: "", patientName: "" };
+        slot.patient = { karteNo: "", patientName: "", patientType: "" };
       }
       if (typeof slot.patient.karteNo !== "string") slot.patient.karteNo = "";
       if (typeof slot.patient.patientName !== "string") slot.patient.patientName = "";
+      if (typeof slot.patient.patientType !== "string") slot.patient.patientType = "";
       normalizeSlot(slot);
       findings.forEach((name) => {
         if (!slot.o[name]) slot.o[name] = "なし";
@@ -1624,6 +1632,7 @@
         slot.p.nextMemo.trim() ||
         slot.patient.karteNo.trim() ||
         slot.patient.patientName.trim() ||
+        slot.patient.patientType.trim() ||
         slot.output.trim()
       );
     }
@@ -1659,7 +1668,9 @@
         slot.additionalDetails.pelvicPrev ||
         slot.additionalDetails.pelvicCurrent ||
         slot.additionalDetails.emsMode ||
-        slot.additionalDetails.emsCurrent
+        slot.additionalDetails.emsCurrent ||
+        slot.patient.karteNo.trim() ||
+        slot.patient.patientType.trim()
       );
     }
 
@@ -1941,10 +1952,13 @@
           button.dataset.value = value;
           button.textContent = value;
           button.addEventListener("click", () => {
+            const wasActive = button.classList.contains("active");
             if (!config.multiple) {
               [...container.children].forEach((child) => child.classList.remove("active"));
             }
-            button.classList.toggle("active");
+            if (config.multiple || !wasActive) {
+              button.classList.toggle("active");
+            }
             if (!config.multiple && value === "未選択") {
               button.classList.remove("active");
             }
@@ -2018,13 +2032,9 @@
 
     function renderPartDetails(sourceSlot) {
       const container = document.getElementById("sPartDetailChoices");
-      if (!sourceSlot && !selectedTime) {
-        container.innerHTML = "";
-        container.classList.add("hidden");
-        return;
-      }
-      const slot = sourceSlot || ensureSlot(selectedPractitioner, selectedTime);
-      const selectedParts = getChoiceValues("sPart").filter((part) => part !== "前回と同じ" && part !== "その他");
+      const slot = sourceSlot || (selectedTime ? ensureSlot(selectedPractitioner, selectedTime) : blankSlot());
+      const selectedParts = (sourceSlot ? slot.s.part : getChoiceValues("sPart"))
+        .filter((part) => part !== "前回と同じ" && part !== "その他");
       container.innerHTML = "";
       container.classList.toggle("hidden", selectedParts.length === 0);
 
@@ -2041,8 +2051,9 @@
           partSides.forEach((side) => {
             choices.appendChild(createPartDetailButton("side", part, side, slot.s.partDetails[part] === side));
           });
+          const selectedFingers = Array.isArray(slot.s.fingerDetails[part]) ? slot.s.fingerDetails[part] : [];
           fingers.forEach((finger) => {
-            choices.appendChild(createPartDetailButton("finger", part, finger, slot.s.fingerDetails[part].includes(finger)));
+            choices.appendChild(createPartDetailButton("finger", part, finger, selectedFingers.includes(finger)));
           });
         } else {
           partSides.forEach((side) => {
@@ -2065,12 +2076,15 @@
       button.dataset.value = value;
       button.textContent = value;
       button.addEventListener("click", () => {
+        const wasActive = button.classList.contains("active");
         if (kind === "side") {
           [...button.parentElement.children]
             .filter((child) => child.dataset.kind === "side")
             .forEach((child) => child.classList.remove("active"));
         }
-        button.classList.toggle("active");
+        if (kind !== "side" || !wasActive) {
+          button.classList.toggle("active");
+        }
         saveCurrentSlot();
         renderTimeline();
       });
@@ -2100,13 +2114,9 @@
 
     function renderConditionLevels(sourceSlot) {
       const container = document.getElementById("sConditionLevelChoices");
-      if (!sourceSlot && !selectedTime) {
-        container.innerHTML = "";
-        container.classList.add("hidden");
-        return;
-      }
-      const slot = sourceSlot || ensureSlot(selectedPractitioner, selectedTime);
-      const selectedConditions = getChoiceValues("sCondition").filter((condition) => condition !== "前回と同じ" && condition !== "その他");
+      const slot = sourceSlot || (selectedTime ? ensureSlot(selectedPractitioner, selectedTime) : blankSlot());
+      const selectedConditions = (sourceSlot ? slot.s.condition : getChoiceValues("sCondition"))
+        .filter((condition) => condition !== "前回と同じ" && condition !== "その他");
       container.innerHTML = "";
       container.classList.toggle("hidden", selectedConditions.length === 0);
 
@@ -2137,8 +2147,11 @@
       button.dataset.conditionLevel = value;
       button.textContent = value;
       button.addEventListener("click", () => {
+        const wasActive = button.classList.contains("active");
         [...button.parentElement.children].forEach((child) => child.classList.remove("active"));
-        button.classList.toggle("active");
+        if (!wasActive) {
+          button.classList.toggle("active");
+        }
         saveCurrentSlot();
         renderTimeline();
       });
@@ -2191,6 +2204,7 @@
         updatePatientNameDisplay("");
       }
       slot.patient.karteNo = karteNo;
+      slot.patient.patientType = getChoiceValues("patientType");
       slot.additionalTreatments = getChoiceValues("additionalTreatments");
       slot.additionalDetails.moreCount = slot.additionalTreatments.includes("MORE") ? getChoiceValues("moreCount") : "";
       slot.additionalDetails.pelvicPrev = slot.additionalTreatments.includes("骨盤") ? fields.pelvicPrev.value : "";
@@ -2246,6 +2260,7 @@
       fields.pNextMemo.value = slot.p.nextMemo;
       fields.karteNoInput.value = slot.patient.karteNo || "";
       updatePatientNameDisplay(slot.patient.patientName || "");
+      setChoiceValues("patientType", slot.patient.patientType || "");
       fields.soapOutput.value = slot.output;
       updateSelectedLabel();
       updateCounter();
@@ -2392,15 +2407,28 @@
 
     function buildPlan(slot) {
       const items = [];
+      const patientTypePlan = buildPatientTypePlan(slot);
       const additionalItems = buildAdditionalPlanItems(slot);
       const treatment = formatChoiceText(slot.p.treatment, slot.p.treatmentMemo);
       const guidance = formatChoiceText(slot.p.guidance, slot.p.guidanceMemo);
       const next = formatChoiceText(slot.p.next, slot.p.nextMemo);
+      if (patientTypePlan) items.push(patientTypePlan);
       if (additionalItems.length) items.push(...additionalItems);
       if (treatment) items.push(`本日行った施術は${treatment}`);
       if (guidance) items.push(`指導内容は${guidance}`);
       if (next) items.push(`次回確認事項は${next}`);
       return finishSentence(items.length ? items.join("。") : "施術者確認後に記載");
+    }
+
+    function buildPatientTypePlan(slot) {
+      const patientType = slot.patient?.patientType || "";
+      if (patientType === "新患") {
+        return "新患として状態確認を行い、症状経過と施術反応を確認する";
+      }
+      if (patientType === "再診") {
+        return "再診として前回からの変化を確認し、継続して経過を確認する";
+      }
+      return "";
     }
 
     function buildAdditionalPlanItems(slot) {
@@ -2418,6 +2446,9 @@
         if (item === "EMS") {
           const emsDetails = [details.emsMode, details.emsCurrent ? `電流量${details.emsCurrent}` : ""].filter(Boolean).join("、");
           return `追加施術としてEMSを実施${emsDetails ? `。${emsDetails}` : ""}`;
+        }
+        if (item === "１症追加") {
+          return "追加施術として１症追加を実施";
         }
         return `追加施術として${item}を実施`;
       });
@@ -2530,68 +2561,13 @@
       setMessage("時間枠の選択を解除しました");
     }
 
-    function clearActiveChoicesInPanel(panel) {
-      panel.querySelectorAll(".choice.active").forEach((choice) => {
-        choice.classList.remove("active");
-      });
-    }
-
-    function getAdditionalTreatmentPanel() {
-      const container = document.getElementById("additionalTreatmentChoices");
-      return container ? container.closest(".panel") : null;
-    }
-
-    function getPlanPanel() {
-      const container = document.getElementById("pTreatmentChoices");
-      return container ? container.closest(".panel") : null;
-    }
-
-    function savePanelChoiceState() {
-      saveCurrentSlot();
-      renderTimeline();
-    }
-
-    function handlePanelBlankClick(panel, options = {}) {
-      if (!selectedTime) return;
-      clearActiveChoicesInPanel(panel);
-      if (options.renderSubjectiveDetails) {
-        renderPartDetails();
-        renderConditionLevels();
-      }
-      if (options.renderAdditionalDetails) {
-        renderAdditionalTreatmentDetails();
-      }
-      savePanelChoiceState();
-    }
-
     function handleBlankAreaClick(event) {
       const target = event.target;
       if (!target || !target.closest || isSelectionControlTarget(target)) return;
 
       if (target.closest(".schedule, .timeline")) {
         deselectCurrentSlot();
-        return;
       }
-
-      const additionalPanel = getAdditionalTreatmentPanel();
-      if (additionalPanel && additionalPanel.contains(target)) {
-        handlePanelBlankClick(additionalPanel, { renderAdditionalDetails: true });
-        return;
-      }
-
-      const planPanel = getPlanPanel();
-      if (planPanel && planPanel.contains(target)) {
-        handlePanelBlankClick(planPanel);
-        return;
-      }
-
-      const subjectivePanel = target.closest(".s-panel");
-      if (subjectivePanel) {
-        handlePanelBlankClick(subjectivePanel, { renderSubjectiveDetails: true });
-        return;
-      }
-
-      if (target.closest(".o-panel")) return;
     }
 
     function bindInputs() {
