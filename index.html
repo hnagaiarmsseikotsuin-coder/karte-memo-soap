@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
@@ -298,6 +298,48 @@
 
     .field.full {
       grid-column: 1 / -1;
+    }
+
+    .part-rank-display {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid #b9c7d4;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.72);
+      color: #263440;
+      font-weight: 800;
+    }
+
+    .part-rank-display:empty {
+      display: none;
+    }
+
+    .part-rank-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 150px;
+      padding: 8px 12px;
+      border: 1px solid #a8b9c8;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 18px;
+      line-height: 1.25;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    }
+
+    .part-rank-label {
+      color: #5f6f7d;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .part-rank-name {
+      color: #12263a;
+      font-size: 20px;
     }
 
     label {
@@ -683,6 +725,7 @@
                 </button>
                 <div id="patientNameDisplay" class="patient-name">患者名：未確認</div>
                 <div id="patientTypeChoices" class="choice-group patient-type-choices" aria-label="患者分類"></div>
+                <div id="patientOneSymptomChoices" class="choice-group patient-type-choices" aria-label="1症追加"></div>
               </div>
             </div>
             <label for="soapOutput">生成文</label>
@@ -698,6 +741,9 @@
               </h2>
               <div class="fields">
                 <div class="field full">
+                  <div id="sPartRankDisplay" class="part-rank-display"></div>
+                </div>
+                <div class="field full">
                   <label>前回からの変化</label>
                   <div id="sChangeChoices" class="choice-group"></div>
                 </div>
@@ -712,17 +758,13 @@
                   <div id="sConditionLevelChoices" class="part-detail hidden"></div>
                 </div>
                 <div class="field full">
-                  <label>本日の希望</label>
-                  <div id="sRequestChoices" class="choice-group"></div>
-                </div>
-                <div class="field full">
                   <label for="sMemo">その他メモ</label>
-                  <textarea id="sMemo" class="memo" placeholder="生活上の出来事…例）先週、家族と旅行 / 週末に買い物で歩いた / 仕事が忙しかった"></textarea>
+                  <textarea id="sMemo" class="memo" placeholder="生活上の出来事など例：先週、家族と旅行 / 週末に買い物で歩いた / 仕事が忙しかった"></textarea>
                 </div>
               </div>
             </section>
 
-            <section class="panel p-panel" aria-label="追加施術 予定メニュー">
+            <section class="panel p-panel" aria-label="追加施術・予定メニュー">
               <h2 class="panel-title">
                 <span>追加施術・予定メニュー</span>
                 <span class="role-note">選択内容はPへ反映</span>
@@ -750,7 +792,7 @@
                 <div id="emsDetail" class="field full hidden">
                   <label>EMS詳細</label>
                   <div id="emsModeChoices" class="choice-group"></div>
-                  <label for="emsCurrent">電流の量</label>
+                  <label for="emsCurrent">電流量</label>
                   <select id="emsCurrent"></select>
                 </div>
               </div>
@@ -805,8 +847,7 @@
       sChange: { container: "sChangeChoices", values: ["前回と同じ", "良い", "少し良い", "変化なし", "少し悪い", "悪い", "別部位あり"], multiple: false },
       sPart: { container: "sPartChoices", values: ["前回と同じ", "頭", "首", "肩", "腕", "肘", "手首", "手の指", "背中", "腰", "骨盤", "股関節", "太もも", "膝", "ふくらはぎ", "足首", "足裏", "足の指", "その他"], multiple: true },
       sCondition: { container: "sConditionChoices", values: ["前回と同じ", "痛い", "重い", "張る", "だるい", "違和感", "しびれ", "動かしにくい", "その他"], multiple: true },
-      sRequest: { container: "sRequestChoices", values: ["いつも通り", "重点確認", "軽め", "強め", "相談あり", "その他"], multiple: true },
-      additionalTreatments: { container: "additionalTreatmentChoices", values: ["MORE", "足リンパ", "骨盤", "ハイボル", "EMS", "小顔", "テーピング", "１症追加"], multiple: true },
+      additionalTreatments: { container: "additionalTreatmentChoices", values: ["MORE", "足リンパ", "骨盤", "ハイボル", "EMS", "小顔", "テーピング"], multiple: true },
       moreCount: { container: "moreCountChoices", values: ["1回", "2回", "3回"], multiple: false },
       emsMode: { container: "emsModeChoices", values: ["A：干渉波＋変調波 4K40 8K40", "B：干渉波＋変調波 F-1 F-2", "C：パルス波 4K40 8K40", "D：パルス波 F-5 F-6"], multiple: false },
       pTreatment: { container: "pTreatmentChoices", values: ["手技", "ストレッチ", "関節可動域訓練", "テーピング", "確認のみ", "その他"], multiple: true },
@@ -814,17 +855,18 @@
       pNext: { container: "pNextChoices", values: ["同部位の変化", "症状レベル", "可動域", "負担動作", "施術反応", "通常通り", "その他"], multiple: true }
     };
     choiceGroups.patientType = { container: "patientTypeChoices", values: ["新患", "再診"], multiple: false };
+    choiceGroups.patientOneSymptom = { container: "patientOneSymptomChoices", values: ["1症追加"], multiple: true };
     const partSides = ["右", "左", "両方"];
     const fingers = ["親指", "人差し指", "中指", "薬指", "小指"];
     const conditionLevels = ["軽度：1〜3", "中等度：4〜7", "重度：8〜10"];
-    const findings = ["圧痛", "運動痛", "自律神経症状の疑い（めまい・耳鳴り・気持ち悪さ・緊張痛）", "自発痛", "炎症所見（熱感・発赤）", "骨折の疑い（異常可動性・軋轢音・転移・変形）", "脱臼の疑い（弾発性固定・関節部の変形・関節窩の空虚）"];
+    const findings = ["圧痛", "運動痛", "自律神経症状", "自発痛", "炎症所見", "骨折の疑い", "脱臼の疑い"];
     const findingLevels = ["なし", "軽度", "中等度", "重度"];
     const findingNoteLabels = {
       "圧痛": "部位",
       "自発痛": "部位",
-      "炎症所見（熱感・発赤）": "部位",
+      "炎症所見": "部位",
       "運動痛": "関節・方向・角度",
-      "自律神経症状の疑い（めまい・耳鳴り・気持ち悪さ・緊張痛）": "詳細"
+      "自律神経症状": "詳細"
     };
     const todayKey = getTodayKey();
     const IDLE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -836,6 +878,7 @@
     let messageTimer = null;
     let cloudSaveTimer = null;
     let cloudSaveKey = "";
+    let pendingCloudSaveSections = new Set();
     let idleRefreshTimer = null;
     let isSaving = false;
     let isRefreshing = false;
@@ -900,7 +943,8 @@
         patient: {
           karteNo: "",
           patientName: "",
-          patientType: ""
+          patientType: "",
+          oneSymptomAdditional: false
         },
         output: ""
       };
@@ -957,8 +1001,9 @@
       const previousPractitioner = selectedPractitioner;
       const previousTime = selectedTime;
       if (previousTime) {
-        saveCurrentSlot();
-        saveCloudSlotNow(previousPractitioner, previousTime, activeDateKey);
+        const pendingSections = Array.from(pendingCloudSaveSections);
+        saveCurrentSlot({ skipCloud: true });
+        if (pendingSections.length) saveCloudSlotNow(previousPractitioner, previousTime, activeDateKey, pendingSections);
       }
       activeDateKey = dateKey;
       if (selectedTime) {
@@ -1069,21 +1114,40 @@
       });
     }
 
-    function cancelCloudSave() {
+    function cancelCloudSave(options = {}) {
       clearTimeout(cloudSaveTimer);
       cloudSaveTimer = null;
       cloudSaveKey = "";
+      if (!options.keepPendingSections) pendingCloudSaveSections.clear();
     }
 
-    function scheduleCloudSave() {
+    function normalizeCloudSaveSections(sections) {
+      const validSections = new Set(["patient", "s", "additional", "o", "p", "output"]);
+      const list = Array.isArray(sections) ? sections : (sections ? [sections] : []);
+      return [...new Set(list)].filter((section) => validSections.has(section));
+    }
+
+    function scheduleCloudSave(sections = null) {
       if (!selectedTime) return;
-      cancelCloudSave();
       const saveDateKey = activeDateKey;
       const practitionerId = selectedPractitioner;
       const time = selectedTime;
-      cloudSaveKey = getSlotKey(saveDateKey, practitionerId, time);
+      const nextCloudSaveKey = getSlotKey(saveDateKey, practitionerId, time);
+      const sectionList = normalizeCloudSaveSections(sections);
+      if (cloudSaveKey && cloudSaveKey !== nextCloudSaveKey) {
+        pendingCloudSaveSections.clear();
+      }
+      clearTimeout(cloudSaveTimer);
+      cloudSaveTimer = null;
+      if (sectionList.length) {
+        sectionList.forEach((section) => pendingCloudSaveSections.add(section));
+      } else {
+        pendingCloudSaveSections.clear();
+      }
+      cloudSaveKey = nextCloudSaveKey;
       cloudSaveTimer = setTimeout(() => {
-        saveCloudSlotNow(practitionerId, time, saveDateKey);
+        const pendingSections = Array.from(pendingCloudSaveSections);
+        saveCloudSlotNow(practitionerId, time, saveDateKey, pendingSections.length ? pendingSections : null);
       }, 1500);
     }
 
@@ -1099,6 +1163,50 @@
         is_filled: isFilled(slot),
         karteNo: slot.patient?.karteNo || "",
         payload: slot
+      };
+    }
+
+    function buildSectionPayload(slot, section) {
+      if (section === "patient") {
+        return { patient: slot.patient };
+      }
+      if (section === "s") {
+        return { s: slot.s };
+      }
+      if (section === "additional") {
+        return {
+          additionalTreatments: slot.additionalTreatments,
+          additionalDetails: slot.additionalDetails
+        };
+      }
+      if (section === "o") {
+        return {
+          o: slot.o,
+          oNotes: slot.oNotes
+        };
+      }
+      if (section === "p") {
+        return { p: slot.p };
+      }
+      if (section === "output") {
+        return { output: slot.output };
+      }
+      return {};
+    }
+
+    function buildCloudSectionSaveRequest(practitionerId, time, dateKey, section) {
+      const slot = ensureSlot(practitionerId, time, dateKey);
+      return {
+        action: "saveMemoSection",
+        date: dateKey,
+        practitioner_id: practitionerId,
+        practitioner_name: getPractitionerName(practitionerId),
+        time_slot: time,
+        updated_by: navigator.userAgent,
+        section,
+        is_filled: isFilled(slot),
+        karteNo: slot.patient?.karteNo || "",
+        payload: buildSectionPayload(slot, section)
       };
     }
 
@@ -1128,8 +1236,9 @@
       }
     }
 
-    async function saveCloudSlotNow(practitionerId = selectedPractitioner, time = selectedTime, dateKey = activeDateKey) {
+    async function saveCloudSlotNow(practitionerId = selectedPractitioner, time = selectedTime, dateKey = activeDateKey, sections = null) {
       if (!time) return false;
+      const sectionList = normalizeCloudSaveSections(sections);
       await waitForRefreshToFinish();
       const savingSlotKey = getSlotKey(dateKey, practitionerId, time);
       cancelCloudSave();
@@ -1137,7 +1246,13 @@
       isSaving = true;
       setMessage("保存中...");
       try {
-        const result = await postGas(buildCloudSaveRequest(practitionerId, time, dateKey));
+        const requests = sectionList.length
+          ? sectionList.map((section) => buildCloudSectionSaveRequest(practitionerId, time, dateKey, section))
+          : [buildCloudSaveRequest(practitionerId, time, dateKey)];
+        let result = {};
+        for (const request of requests) {
+          result = await postGas(request);
+        }
         if (result.updated_at || result.version) {
           slot.cloudMeta = {
             updated_at: result.updated_at || "",
@@ -1349,15 +1464,15 @@
       isRefreshing = true;
       if (!isAuto) setMessage("共有データを更新中...");
       try {
-        console.log("共有更新 activeDateKey", activeDateKey);
-        console.log("共有更新 mode", mode);
+        console.log("shared refresh activeDateKey", activeDateKey);
+        console.log("shared refresh mode", mode);
         const result = await postGas({
           action: "loadMemos",
           date: activeDateKey
         });
-        console.log("共有更新 result", result);
+        console.log("shared refresh result", result);
         const rows = getCloudRows(result);
-        console.log("共有更新 rows", rows);
+        console.log("shared refresh rows", rows);
         console.log("cloud rows length", Array.isArray(rows) ? rows.length : 0);
 
         if (!Array.isArray(rows) || rows.length === 0) {
@@ -1382,7 +1497,7 @@
           console.log("cloud payload", payload);
           console.log("cloud has data", payloadHasData);
           console.log("cloud target", activeDateKey, practitionerId, timeSlot);
-          console.log("共有更新 row detail", {
+          console.log("shared refresh row detail", {
             record_key: getCloudRowValue(row, ["record_key", "recordKey"], 0),
             date: getCloudRowValue(row, ["date"], 1),
             practitioner_id: practitionerId,
@@ -1397,7 +1512,7 @@
           if (isDeleted) {
             if (shouldSkipCloudApply(practitionerId, timeSlot, options)) {
               skippedEditingCount += 1;
-              console.log("共有更新 skipped editing deleted row", activeDateKey, practitionerId, timeSlot);
+              console.log("shared refresh skipped editing deleted row", activeDateKey, practitionerId, timeSlot);
               return;
             }
             if (practitionerId && timeSlot && practitioners.some((item) => item.id === practitionerId)) {
@@ -1419,27 +1534,27 @@
               const after = serializeSlotForCompare(normalizedSlot);
               appliedCount += 1;
               if (before !== after) changedCount += 1;
-              console.log("共有更新 deleted applied", activeDateKey, practitionerId, timeSlot);
+              console.log("shared refresh deleted applied", activeDateKey, practitionerId, timeSlot);
               console.log("cloud applied count", appliedCount);
             } else {
-              console.warn("共有更新 skipped deleted row", row);
+              console.warn("shared refresh skipped deleted row", row);
             }
             return;
           }
 
           if (!practitionerId || !timeSlot || !payload) {
-            console.warn("共有更新 skipped", row);
+            console.warn("shared refresh skipped", row);
             return;
           }
 
           if (shouldSkipCloudApply(practitionerId, timeSlot, options)) {
             skippedEditingCount += 1;
-            console.log("共有更新 skipped editing row", activeDateKey, practitionerId, timeSlot);
+            console.log("shared refresh skipped editing row", activeDateKey, practitionerId, timeSlot);
             return;
           }
 
           if (!practitioners.some((item) => item.id === practitionerId)) {
-            console.warn("未知の施術者ID", practitionerId);
+            console.warn("unknown practitioner ID", practitionerId);
             return;
           }
 
@@ -1457,7 +1572,7 @@
           const normalizedSlot = ensureSlot(practitionerId, timeSlot, activeDateKey);
           const after = serializeSlotForCompare(normalizedSlot);
           const filledAfterApply = isFilled(normalizedSlot);
-          console.log("反映後 isFilled", activeDateKey, practitionerId, timeSlot, filledAfterApply, normalizedSlot);
+          console.log("蜿肴丐蠕・isFilled", activeDateKey, practitionerId, timeSlot, filledAfterApply, normalizedSlot);
           appliedCount += 1;
           if (before !== after) changedCount += 1;
           console.log("cloud applied count", appliedCount);
@@ -1528,11 +1643,12 @@
       if (!slot.p) slot.p = blankSlot().p;
       if (!slot.additionalDetails) slot.additionalDetails = blankSlot().additionalDetails;
       if (!slot.patient || typeof slot.patient !== "object" || Array.isArray(slot.patient)) {
-        slot.patient = { karteNo: "", patientName: "", patientType: "" };
+        slot.patient = { karteNo: "", patientName: "", patientType: "", oneSymptomAdditional: false };
       }
       if (typeof slot.patient.karteNo !== "string") slot.patient.karteNo = "";
       if (typeof slot.patient.patientName !== "string") slot.patient.patientName = "";
       if (typeof slot.patient.patientType !== "string") slot.patient.patientType = "";
+      if (typeof slot.patient.oneSymptomAdditional !== "boolean") slot.patient.oneSymptomAdditional = false;
       normalizeSlot(slot);
       findings.forEach((name) => {
         if (!slot.o[name]) slot.o[name] = "なし";
@@ -1554,13 +1670,17 @@
       slot.s.part = slot.s.part
         .map((part) => part === "指" ? "手の指" : part)
         .filter((part, index, parts) => choiceGroups.sPart.values.includes(part) && parts.indexOf(part) === index)
-        .sort((left, right) => choiceGroups.sPart.values.indexOf(left) - choiceGroups.sPart.values.indexOf(right));
+        .slice(0, 3);
       normalizeMulti(slot.s, "condition");
       if (!slot.s.conditionLevels || typeof slot.s.conditionLevels !== "object" || Array.isArray(slot.s.conditionLevels)) slot.s.conditionLevels = {};
       normalizeSingle(slot.s, "change");
-      normalizeMulti(slot.s, "request");
+      slot.s.request = [];
       normalizeSimpleMemo(slot.s);
       normalizeMulti(slot, "additionalTreatments");
+      if (slot.additionalTreatments.includes("１症追加") || slot.additionalTreatments.includes("1症追加")) {
+        slot.patient.oneSymptomAdditional = true;
+        slot.additionalTreatments = slot.additionalTreatments.filter((value) => value !== "１症追加" && value !== "1症追加");
+      }
       normalizeSingle(slot.additionalDetails, "moreCount");
       normalizeSingle(slot.additionalDetails, "pelvicPrev");
       normalizeSingle(slot.additionalDetails, "pelvicCurrent");
@@ -1600,8 +1720,7 @@
         formatChoiceText(subjective.life, subjective.lifeMemo || ""),
         subjective.partMemo || "",
         subjective.conditionMemo || "",
-        subjective.changeMemo || "",
-        subjective.requestMemo || ""
+        subjective.changeMemo || ""
       ].filter(Boolean);
       subjective.memo = oldMemoItems.join("。");
     }
@@ -1615,7 +1734,6 @@
         slot.s.condition.length ||
         Object.keys(slot.s.conditionLevels).length ||
         slot.s.change ||
-        slot.s.request.length ||
         slot.s.memo.trim() ||
         slot.additionalTreatments.length ||
         slot.additionalDetails.moreCount ||
@@ -1633,6 +1751,7 @@
         slot.patient.karteNo.trim() ||
         slot.patient.patientName.trim() ||
         slot.patient.patientType.trim() ||
+        slot.patient.oneSymptomAdditional ||
         slot.output.trim()
       );
     }
@@ -1661,7 +1780,6 @@
         slot.s.condition.length ||
         Object.keys(slot.s.conditionLevels).length ||
         slot.s.change ||
-        slot.s.request.length ||
         slot.s.memo.trim() ||
         slot.additionalTreatments.length ||
         slot.additionalDetails.moreCount ||
@@ -1670,7 +1788,8 @@
         slot.additionalDetails.emsMode ||
         slot.additionalDetails.emsCurrent ||
         slot.patient.karteNo.trim() ||
-        slot.patient.patientType.trim()
+        slot.patient.patientType.trim() ||
+        slot.patient.oneSymptomAdditional
       );
     }
 
@@ -1826,7 +1945,7 @@
           updatePatientNameDisplay(patientName);
           persistState();
           renderTimeline();
-          await saveCloudSlotNow(selectedPractitioner, selectedTime);
+          await saveCloudSlotNow(selectedPractitioner, selectedTime, activeDateKey, [...pendingCloudSaveSections, "patient"]);
           setMessage("患者確認しました");
         } else {
           slot.patient.karteNo = karteNo;
@@ -1835,7 +1954,7 @@
           updatePatientNameDisplay("", { notFound: true });
           persistState();
           renderTimeline();
-          await saveCloudSlotNow(selectedPractitioner, selectedTime);
+          await saveCloudSlotNow(selectedPractitioner, selectedTime, activeDateKey, [...pendingCloudSaveSections, "patient"]);
           setMessage("該当患者なし");
         }
         lastAutoLookedUpKarteNo = karteNo;
@@ -1919,7 +2038,7 @@
           select.appendChild(option);
         });
         select.addEventListener("change", () => {
-          saveCurrentSlot();
+          saveCurrentSection("o");
           renderTimeline();
         });
         row.appendChild(label);
@@ -1929,9 +2048,9 @@
           note.type = "text";
           note.id = `finding-note-${name}`;
           note.dataset.findingNote = name;
-          note.placeholder = `${findingNoteLabels[name]}の記入欄`;
+          note.placeholder = findingNoteLabels[name] + "の記録";
           note.addEventListener("input", () => {
-            saveCurrentSlot();
+            saveCurrentSection("o");
             renderTimeline();
           });
           row.appendChild(note);
@@ -1952,6 +2071,20 @@
           button.dataset.value = value;
           button.textContent = value;
           button.addEventListener("click", () => {
+            if (key === "sPart") {
+              const wasActive = button.classList.contains("active");
+              const activeCount = container.querySelectorAll(".choice.active").length;
+              if (!wasActive && activeCount >= 3) {
+                setMessage("本日気になる部位は第3位まで選択できます");
+                return;
+              }
+              button.classList.toggle("active");
+              renderPartDetails();
+              renderPartRankDisplay();
+              saveCurrentSection("s");
+              renderTimeline();
+              return;
+            }
             const wasActive = button.classList.contains("active");
             if (!config.multiple) {
               [...container.children].forEach((child) => child.classList.remove("active"));
@@ -1965,7 +2098,7 @@
             if (key === "sPart") renderPartDetails();
             if (key === "sCondition") renderConditionLevels();
             if (key === "additionalTreatments") renderAdditionalTreatmentDetails();
-            saveCurrentSlot();
+            saveCurrentSection(getChoiceSection(key));
             renderTimeline();
           });
           container.appendChild(button);
@@ -2012,7 +2145,7 @@
             target.value += value;
           }
           updatePelvicDisplays();
-          saveCurrentSlot();
+          saveCurrentSection("additional");
           renderTimeline();
         });
         pad.appendChild(button);
@@ -2070,7 +2203,7 @@
     function createPartDetailButton(kind, part, value, active) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `choice${active ? " active" : ""}`;
+      button.className = "choice" + (active ? " active" : "");
       button.dataset.kind = kind;
       button.dataset.part = part;
       button.dataset.value = value;
@@ -2085,7 +2218,8 @@
         if (kind !== "side" || !wasActive) {
           button.classList.toggle("active");
         }
-        saveCurrentSlot();
+        saveCurrentSection("s");
+        renderPartRankDisplay();
         renderTimeline();
       });
       return button;
@@ -2142,7 +2276,7 @@
     function createConditionLevelButton(condition, value, active) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `choice${active ? " active" : ""}`;
+      button.className = "choice" + (active ? " active" : "");
       button.dataset.condition = condition;
       button.dataset.conditionLevel = value;
       button.textContent = value;
@@ -2152,7 +2286,7 @@
         if (!wasActive) {
           button.classList.toggle("active");
         }
-        saveCurrentSlot();
+        saveCurrentSection("s");
         renderTimeline();
       });
       return button;
@@ -2182,6 +2316,64 @@
       });
     }
 
+    function getOrderedSPartValues() {
+      const activeValues = [...document.getElementById("sPartChoices").querySelectorAll(".active")]
+        .map((button) => button.dataset.value);
+      const activeSet = new Set(activeValues);
+      const previous = selectedTime ? ensureSlot(selectedPractitioner, selectedTime).s.part : [];
+      return [
+        ...previous.filter((part) => activeSet.has(part)),
+        ...activeValues.filter((part) => !previous.includes(part))
+      ].slice(0, 3);
+    }
+
+    function renderPartRankDisplay() {
+      const container = document.getElementById("sPartRankDisplay");
+      if (!container) return;
+      const parts = getOrderedSPartValues();
+      const slot = selectedTime ? ensureSlot(selectedPractitioner, selectedTime) : blankSlot();
+      container.innerHTML = "";
+      parts.forEach((part, index) => {
+        const item = document.createElement("div");
+        item.className = "part-rank-item";
+        const label = document.createElement("span");
+        label.className = "part-rank-label";
+        label.textContent = "第" + (index + 1) + "位";
+        const name = document.createElement("span");
+        name.className = "part-rank-name";
+        name.textContent = formatSubjectivePart(part, slot);
+        item.appendChild(label);
+        item.appendChild(name);
+        container.appendChild(item);
+      });
+    }
+
+    function getChoiceSection(key) {
+      if (["patientType", "patientOneSymptom"].includes(key)) return "patient";
+      if (["sChange", "sPart", "sCondition"].includes(key)) return "s";
+      if (["additionalTreatments", "moreCount", "emsMode"].includes(key)) return "additional";
+      if (["pTreatment", "pGuidance", "pNext"].includes(key)) return "p";
+      return "";
+    }
+
+    function getFieldSection(field) {
+      if (field === fields.karteNoInput) return "patient";
+      if (field === fields.sMemo) return "s";
+      if ([fields.pelvicPrev, fields.pelvicCurrent, fields.emsCurrent].includes(field)) return "additional";
+      if ([fields.pTreatmentMemo, fields.pGuidanceMemo, fields.pNextMemo].includes(field)) return "p";
+      if (field === fields.soapOutput) return "output";
+      return "";
+    }
+
+    function saveCurrentSection(section, options = {}) {
+      const sectionList = normalizeCloudSaveSections(section);
+      const saved = saveCurrentSlot({ skipCloud: true });
+      if (saved && !options.skipCloud && sectionList.length) {
+        scheduleCloudSave(sectionList);
+      }
+      return saved;
+    }
+
     function saveCurrentSlot(options = {}) {
       if (!selectedTime) {
         updateSelectionState();
@@ -2189,14 +2381,14 @@
       }
       const slot = ensureSlot(selectedPractitioner, selectedTime);
       markSlotDirty(activeDateKey, selectedPractitioner, selectedTime);
-      slot.s.part = getChoiceValues("sPart");
+      slot.s.part = getOrderedSPartValues();
       slot.s.partDetails = getPartDetails();
       slot.s.fingerDetails = getFingerDetails();
       slot.s.fingers = slot.s.fingerDetails["手の指"] || [];
       slot.s.condition = getChoiceValues("sCondition");
       slot.s.conditionLevels = getConditionLevels();
       slot.s.change = getChoiceValues("sChange");
-      slot.s.request = getChoiceValues("sRequest");
+      slot.s.request = [];
       slot.s.memo = fields.sMemo.value;
       const karteNo = fields.karteNoInput.value.trim();
       if (slot.patient.karteNo !== karteNo) {
@@ -2205,6 +2397,7 @@
       }
       slot.patient.karteNo = karteNo;
       slot.patient.patientType = getChoiceValues("patientType");
+      slot.patient.oneSymptomAdditional = getChoiceValues("patientOneSymptom").includes("1症追加");
       slot.additionalTreatments = getChoiceValues("additionalTreatments");
       slot.additionalDetails.moreCount = slot.additionalTreatments.includes("MORE") ? getChoiceValues("moreCount") : "";
       slot.additionalDetails.pelvicPrev = slot.additionalTreatments.includes("骨盤") ? fields.pelvicPrev.value : "";
@@ -2232,11 +2425,11 @@
     function loadSlot(time) {
       const slot = ensureSlot(selectedPractitioner, time);
       setChoiceValues("sPart", slot.s.part);
+      renderPartRankDisplay();
       renderPartDetails(slot);
       setChoiceValues("sCondition", slot.s.condition);
       renderConditionLevels(slot);
       setChoiceValues("sChange", slot.s.change);
-      setChoiceValues("sRequest", slot.s.request);
       fields.sMemo.value = slot.s.memo;
       setChoiceValues("additionalTreatments", slot.additionalTreatments);
       setChoiceValues("moreCount", slot.additionalDetails.moreCount);
@@ -2261,6 +2454,7 @@
       fields.karteNoInput.value = slot.patient.karteNo || "";
       updatePatientNameDisplay(slot.patient.patientName || "");
       setChoiceValues("patientType", slot.patient.patientType || "");
+      setChoiceValues("patientOneSymptom", slot.patient.oneSymptomAdditional ? ["1症追加"] : []);
       fields.soapOutput.value = slot.output;
       updateSelectedLabel();
       updateCounter();
@@ -2271,8 +2465,9 @@
       const previousPractitioner = selectedPractitioner;
       const previousTime = selectedTime;
       if (previousTime) {
-        saveCurrentSlot();
-        saveCloudSlotNow(previousPractitioner, previousTime);
+        const pendingSections = Array.from(pendingCloudSaveSections);
+        saveCurrentSlot({ skipCloud: true });
+        if (pendingSections.length) saveCloudSlotNow(previousPractitioner, previousTime, activeDateKey, pendingSections);
       }
       selectedTime = time;
       loadSlot(time);
@@ -2285,8 +2480,9 @@
       const previousPractitioner = selectedPractitioner;
       const previousTime = selectedTime;
       if (previousTime) {
-        saveCurrentSlot();
-        saveCloudSlotNow(previousPractitioner, previousTime);
+        const pendingSections = Array.from(pendingCloudSaveSections);
+        saveCurrentSlot({ skipCloud: true });
+        if (pendingSections.length) saveCloudSlotNow(previousPractitioner, previousTime, activeDateKey, pendingSections);
       }
       selectedPractitioner = practitionerId;
       selectedTime = "09:00";
@@ -2305,20 +2501,21 @@
         updateSelectionState();
         return;
       }
-      saveCurrentSlot();
+      const pendingSections = Array.from(pendingCloudSaveSections);
+      saveCurrentSlot({ skipCloud: true });
       const slot = ensureSlot(selectedPractitioner, selectedTime);
       const soap = [
-        `S：${buildSubjective(slot)}`,
-        `O：${buildObjective(slot)}`,
-        `A：${buildAssessment(slot)}`,
-        `P：${buildPlan(slot)}`
+        "S：" + buildSubjective(slot),
+        "O：" + buildObjective(slot),
+        "A：" + buildAssessment(slot),
+        "P：" + buildPlan(slot)
       ].join("\n\n");
       fields.soapOutput.value = limitMemoLength(soap);
-      saveCurrentSlot();
+      saveCurrentSlot({ skipCloud: true });
       updateCounter();
       renderTimeline();
       setMessage("SOAPを生成しました");
-      saveCloudSlotNow(selectedPractitioner, selectedTime);
+      saveCloudSlotNow(selectedPractitioner, selectedTime, activeDateKey, [...pendingSections, "output"]);
     }
 
     function buildSubjective(slot) {
@@ -2326,24 +2523,28 @@
       const change = formatChoiceText(slot.s.change, "");
       const part = formatSubjectiveParts(slot);
       const condition = formatSubjectiveConditions(slot);
-      const request = formatChoiceText(slot.s.request, "");
       const memo = slot.s.memo.trim();
-      if (change) items.push(`前回からの変化は${change}`);
-      if (part) items.push(`本日気になる部位は${part}`);
-      if (condition) items.push(`本日の状態は${condition}`);
-      if (request) items.push(`本日の希望は${request}`);
-      if (memo) items.push(`その他メモ：${memo}`);
+      if (change) items.push("前回からの変化は" + change);
+      if (part) items.push("本日気になる部位は" + part);
+      if (condition) items.push("本日の状態は" + condition);
+      if (memo) items.push("その他メモ：" + memo);
       return finishSentence(items.length ? items.join("。") : "患者申告の入力なし");
     }
 
     function formatSubjectiveParts(slot) {
-      return slot.s.part.map((part) => formatSubjectivePart(part, slot)).filter(Boolean).join("、");
+      return slot.s.part
+        .map((part, index) => {
+          const text = formatSubjectivePart(part, slot);
+          return text ? "第" + (index + 1) + "位：" + text : "";
+        })
+        .filter(Boolean)
+        .join("、");
     }
 
     function formatSubjectiveConditions(slot) {
       return slot.s.condition.map((condition) => {
         const level = slot.s.conditionLevels[condition];
-        return level ? `${condition}（${level}）` : condition;
+        return level ? condition + "（" + level + "）" : condition;
       }).join("、");
     }
 
@@ -2357,12 +2558,12 @@
       const selected = slot.s.fingerDetails[part] || [];
       const side = slot.s.partDetails[part];
       const label = applyPartSide(part, side);
-      return selected.length ? `${label}（${selected.join("・")}）` : label;
+      return selected.length ? label + "（" + selected.join("・") + "）" : label;
     }
 
     function applyPartSide(part, side) {
-      if (side === "右" || side === "左") return `${side}${part}`;
-      if (side === "両方") return `両${part}`;
+      if (side === "右" || side === "左") return side + part;
+      if (side === "両方") return "両" + part;
       return part;
     }
 
@@ -2371,13 +2572,13 @@
         .filter((name) => slot.o[name] && slot.o[name] !== "なし")
         .map((name) => formatObjectiveFinding(name, slot));
       if (!active.length) return "施術者確認後に記載。";
-      return finishSentence(active.join("、"));
+      return finishSentence(active.join("。"));
     }
 
     function formatObjectiveFinding(name, slot) {
       const noteLabel = findingNoteLabels[name];
       const note = noteLabel ? (slot.oNotes[name] || "").trim() : "";
-      return `${name}：${slot.o[name]}${note ? `（${noteLabel}：${note}）` : ""}`;
+      return name + "：" + slot.o[name] + (note ? "（" + noteLabel + "：" + note + "）" : "");
     }
 
     function buildAssessment(slot) {
@@ -2394,15 +2595,15 @@
         return "患者申告を踏まえ、施術者確認後に状態評価を記載。";
       }
       if (strong.length) {
-        return finishSentence(`${part}は${strong.join("、")}が強く、負担要因や前回比を確認しながら経過を見る`);
+        return finishSentence(part + "は" + strong.join("、") + "が強く、負担要因や前回比を確認しながら経過を見る");
       }
       if (moderate.length) {
-        return finishSentence(`${part}は${moderate.join("、")}が中等度で、負担要因との関連を確認する`);
+        return finishSentence(part + "は" + moderate.join("、") + "が中等度で、負担要因との関連を確認する");
       }
       if (change) {
-        return finishSentence(`前回からの変化は「${change}」との申告で、O所見とあわせて経過確認が必要`);
+        return finishSentence("前回からの変化は「" + change + "」との申告で、所見と合わせて経過確認が必要");
       }
-      return finishSentence(`${part}に軽度所見を認め、経過を確認する`);
+      return finishSentence(part + "に軽度所見を認め、経過を確認する");
     }
 
     function buildPlan(slot) {
@@ -2413,10 +2614,11 @@
       const guidance = formatChoiceText(slot.p.guidance, slot.p.guidanceMemo);
       const next = formatChoiceText(slot.p.next, slot.p.nextMemo);
       if (patientTypePlan) items.push(patientTypePlan);
+      if (slot.patient?.oneSymptomAdditional) items.push("追加施術として1症追加を実施");
       if (additionalItems.length) items.push(...additionalItems);
-      if (treatment) items.push(`本日行った施術は${treatment}`);
-      if (guidance) items.push(`指導内容は${guidance}`);
-      if (next) items.push(`次回確認事項は${next}`);
+      if (treatment) items.push("本日行った施術は" + treatment);
+      if (guidance) items.push("指導内容は" + guidance);
+      if (next) items.push("次回確認事項：" + next);
       return finishSentence(items.length ? items.join("。") : "施術者確認後に記載");
     }
 
@@ -2435,22 +2637,19 @@
       const details = slot.additionalDetails;
       return slot.additionalTreatments.map((item) => {
         if (item === "MORE") {
-          return `追加施術としてMORE${details.moreCount ? `を${details.moreCount}` : "を"}実施`;
+          return "追加施術としてMORE" + (details.moreCount ? "を" + details.moreCount : "を") + "実施";
         }
         if (item === "骨盤") {
           const values = details.pelvicPrev && details.pelvicCurrent
-            ? `前回${details.pelvicPrev}→今回${details.pelvicCurrent}`
+            ? "前回" + details.pelvicPrev + "→今回" + details.pelvicCurrent
             : "";
-          return `追加施術として骨盤を実施${values ? `。${values}` : ""}`;
+          return "追加施術として骨盤を実施" + (values ? "。" + values : "");
         }
         if (item === "EMS") {
-          const emsDetails = [details.emsMode, details.emsCurrent ? `電流量${details.emsCurrent}` : ""].filter(Boolean).join("、");
-          return `追加施術としてEMSを実施${emsDetails ? `。${emsDetails}` : ""}`;
+          const emsDetails = [details.emsMode, details.emsCurrent ? "電流量" + details.emsCurrent : ""].filter(Boolean).join("、");
+          return "追加施術としてEMSを実施" + (emsDetails ? "。" + emsDetails : "");
         }
-        if (item === "１症追加") {
-          return "追加施術として１症追加を実施";
-        }
-        return `追加施術として${item}を実施`;
+        return "追加施術として" + item + "を実施";
       });
     }
 
@@ -2459,7 +2658,6 @@
         slot.s.part.length ||
         slot.s.condition.length ||
         slot.s.change ||
-        slot.s.request.length ||
         slot.s.memo.trim()
       );
     }
@@ -2469,17 +2667,17 @@
       const usable = selected.filter((value) => value !== "未選択");
       const text = usable.join("、");
       const note = memo.trim();
-      if (text && note) return `${text}（${note}）`;
+      if (text && note) return text + "（" + note + "）";
       return text || note;
     }
 
     function finishSentence(text) {
-      const cleaned = text.trim().replace(/[。]+$/g, "");
-      return `${cleaned}。`;
+      const cleaned = text.trim().replace(/[。、\s]+$/g, "");
+      return cleaned + "。";
     }
 
     function limitMemoLength(text) {
-      return text.length <= 250 ? text : `${text.slice(0, 249).replace(/[。、\s]+$/g, "")}。`;
+      return text.length <= 250 ? text : text.slice(0, 249).replace(/[。、\s]+$/g, "") + "。";
     }
 
     async function copySoap() {
@@ -2488,7 +2686,7 @@
         updateSelectionState();
         return;
       }
-      saveCurrentSlot();
+      saveCurrentSlot({ skipCloud: true });
       const text = fields.soapOutput.value.trim();
       if (!text) {
         setMessage("コピーする文章がありません");
@@ -2537,7 +2735,7 @@
     }
 
     function updateCounter() {
-      document.getElementById("counter").textContent = `${fields.soapOutput.value.length}字`;
+      document.getElementById("counter").textContent = fields.soapOutput.value.length + "字";
     }
 
     function updateSelectionState() {
@@ -2553,8 +2751,9 @@
       const previousPractitioner = selectedPractitioner;
       const previousTime = selectedTime;
       const previousDateKey = activeDateKey;
-      saveCurrentSlot();
-      saveCloudSlotNow(previousPractitioner, previousTime, previousDateKey);
+      const pendingSections = Array.from(pendingCloudSaveSections);
+      saveCurrentSlot({ skipCloud: true });
+      if (pendingSections.length) saveCloudSlotNow(previousPractitioner, previousTime, previousDateKey, pendingSections);
       selectedTime = "";
       renderTimeline();
       updateSelectionState();
@@ -2574,14 +2773,14 @@
       Object.values(fields).forEach((field) => {
         field.addEventListener("input", () => {
           if (field === fields.karteNoInput) handleKarteNoInput();
-          saveCurrentSlot();
+          saveCurrentSection(getFieldSection(field));
           if (field === fields.karteNoInput) schedulePatientLookupIfReady();
           updateCounter();
           renderTimeline();
         });
         field.addEventListener("change", () => {
           if (field === fields.karteNoInput) handleKarteNoInput();
-          saveCurrentSlot();
+          saveCurrentSection(getFieldSection(field));
           if (field === fields.karteNoInput) schedulePatientLookupIfReady();
           renderTimeline();
         });
