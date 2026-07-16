@@ -869,7 +869,6 @@
       "自律神経症状": "詳細"
     };
     const todayKey = getTodayKey();
-    const IDLE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
     const PATIENT_LOOKUP_DEBOUNCE_MS = 400;
     let activeDateKey = getInitialActiveDateKey();
     const state = loadState();
@@ -998,12 +997,8 @@
         updateDateLabel();
         return;
       }
-      const previousPractitioner = selectedPractitioner;
-      const previousTime = selectedTime;
-      if (previousTime) {
-        const pendingSections = Array.from(pendingCloudSaveSections);
+      if (selectedTime) {
         saveCurrentSlot({ skipCloud: true });
-        if (pendingSections.length) saveCloudSlotNow(previousPractitioner, previousTime, activeDateKey, pendingSections);
       }
       activeDateKey = dateKey;
       if (selectedTime) {
@@ -1128,27 +1123,7 @@
     }
 
     function scheduleCloudSave(sections = null) {
-      if (!selectedTime) return;
-      const saveDateKey = activeDateKey;
-      const practitionerId = selectedPractitioner;
-      const time = selectedTime;
-      const nextCloudSaveKey = getSlotKey(saveDateKey, practitionerId, time);
-      const sectionList = normalizeCloudSaveSections(sections);
-      if (cloudSaveKey && cloudSaveKey !== nextCloudSaveKey) {
-        pendingCloudSaveSections.clear();
-      }
-      clearTimeout(cloudSaveTimer);
-      cloudSaveTimer = null;
-      if (sectionList.length) {
-        sectionList.forEach((section) => pendingCloudSaveSections.add(section));
-      } else {
-        pendingCloudSaveSections.clear();
-      }
-      cloudSaveKey = nextCloudSaveKey;
-      cloudSaveTimer = setTimeout(() => {
-        const pendingSections = Array.from(pendingCloudSaveSections);
-        saveCloudSlotNow(practitionerId, time, saveDateKey, pendingSections.length ? pendingSections : null);
-      }, 1500);
+      // Cloud saves are manual-only. Keep this function as a no-op so existing local-save paths stay stable.
     }
 
     function buildCloudSaveRequest(practitionerId, time, dateKey = activeDateKey) {
@@ -1815,15 +1790,13 @@
     }
 
     function requestAutoRefresh(mode, target = document.activeElement) {
-      return reloadCloudMemos(createAutoRefreshOptions(mode, target));
+      // Shared refresh is manual-only.
+      return false;
     }
 
     function startIdleRefreshTimer() {
-      if (idleRefreshTimer) clearInterval(idleRefreshTimer);
-      idleRefreshTimer = setInterval(() => {
-        requestAutoRefresh("idle");
-      }, IDLE_REFRESH_INTERVAL_MS);
-      console.log("shared idle refresh timer started", IDLE_REFRESH_INTERVAL_MS);
+      // Shared refresh is manual-only. The timer is intentionally disabled.
+      stopIdleRefreshTimer();
     }
 
     function stopIdleRefreshTimer() {
@@ -1945,7 +1918,6 @@
           updatePatientNameDisplay(patientName);
           persistState();
           renderTimeline();
-          await saveCloudSlotNow(selectedPractitioner, selectedTime, activeDateKey, [...pendingCloudSaveSections, "patient"]);
           setMessage("患者確認しました");
         } else {
           slot.patient.karteNo = karteNo;
@@ -1954,7 +1926,6 @@
           updatePatientNameDisplay("", { notFound: true });
           persistState();
           renderTimeline();
-          await saveCloudSlotNow(selectedPractitioner, selectedTime, activeDateKey, [...pendingCloudSaveSections, "patient"]);
           setMessage("該当患者なし");
         }
         lastAutoLookedUpKarteNo = karteNo;
@@ -2366,12 +2337,7 @@
     }
 
     function saveCurrentSection(section, options = {}) {
-      const sectionList = normalizeCloudSaveSections(section);
-      const saved = saveCurrentSlot({ skipCloud: true });
-      if (saved && !options.skipCloud && sectionList.length) {
-        scheduleCloudSave(sectionList);
-      }
-      return saved;
+      return saveCurrentSlot({ skipCloud: true });
     }
 
     function saveCurrentSlot(options = {}) {
@@ -2418,7 +2384,6 @@
       slot.p.nextMemo = fields.pNextMemo.value;
       slot.output = fields.soapOutput.value;
       persistState();
-      if (!options.skipCloud) scheduleCloudSave();
       return true;
     }
 
@@ -2462,12 +2427,9 @@
     }
 
     function selectTime(time) {
-      const previousPractitioner = selectedPractitioner;
       const previousTime = selectedTime;
       if (previousTime) {
-        const pendingSections = Array.from(pendingCloudSaveSections);
         saveCurrentSlot({ skipCloud: true });
-        if (pendingSections.length) saveCloudSlotNow(previousPractitioner, previousTime, activeDateKey, pendingSections);
       }
       selectedTime = time;
       loadSlot(time);
@@ -2477,12 +2439,9 @@
 
     function selectPractitioner(practitionerId) {
       if (practitionerId === selectedPractitioner) return;
-      const previousPractitioner = selectedPractitioner;
       const previousTime = selectedTime;
       if (previousTime) {
-        const pendingSections = Array.from(pendingCloudSaveSections);
         saveCurrentSlot({ skipCloud: true });
-        if (pendingSections.length) saveCloudSlotNow(previousPractitioner, previousTime, activeDateKey, pendingSections);
       }
       selectedPractitioner = practitionerId;
       selectedTime = "09:00";
@@ -2501,7 +2460,6 @@
         updateSelectionState();
         return;
       }
-      const pendingSections = Array.from(pendingCloudSaveSections);
       saveCurrentSlot({ skipCloud: true });
       const slot = ensureSlot(selectedPractitioner, selectedTime);
       const soap = [
@@ -2515,7 +2473,6 @@
       updateCounter();
       renderTimeline();
       setMessage("SOAPを生成しました");
-      saveCloudSlotNow(selectedPractitioner, selectedTime, activeDateKey, [...pendingSections, "output"]);
     }
 
     function buildSubjective(slot) {
@@ -2748,12 +2705,7 @@
 
     function deselectCurrentSlot() {
       if (!selectedTime) return;
-      const previousPractitioner = selectedPractitioner;
-      const previousTime = selectedTime;
-      const previousDateKey = activeDateKey;
-      const pendingSections = Array.from(pendingCloudSaveSections);
       saveCurrentSlot({ skipCloud: true });
-      if (pendingSections.length) saveCloudSlotNow(previousPractitioner, previousTime, previousDateKey, pendingSections);
       selectedTime = "";
       renderTimeline();
       updateSelectionState();
@@ -2795,7 +2747,7 @@
           updateSelectionState();
           return;
         }
-        saveCurrentSlot();
+        saveCurrentSlot({ skipCloud: true });
         saveCloudSlotNow(selectedPractitioner, selectedTime);
       });
       document.getElementById("cloudReloadBtn").addEventListener("click", () => reloadCloudMemos());
@@ -2832,7 +2784,6 @@
       loadSlot(selectedTime);
       renderTimeline();
       persistState();
-      startIdleRefreshTimer();
     }
 
     init();
