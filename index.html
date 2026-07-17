@@ -504,6 +504,11 @@
       margin-bottom: 10px;
     }
 
+    .action-menu-gap {
+      grid-column: 1 / -1;
+      height: 12px;
+    }
+
     .btn {
       min-height: 48px;
       border: 1px solid var(--primary-dark);
@@ -512,6 +517,15 @@
       color: #fff;
       cursor: pointer;
       font-weight: 900;
+    }
+
+    .btn-note {
+      display: block;
+      margin-top: 3px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.2;
+      opacity: 0.78;
     }
 
     .btn.secondary {
@@ -707,8 +721,9 @@
             <div class="actions">
               <button id="generateBtn" class="btn" type="button">SOAP生成</button>
               <button id="copyBtn" class="btn secondary" type="button">コピー</button>
-              <button id="cloudSaveBtn" class="btn secondary" type="button">クラウド保存</button>
-              <button id="cloudReloadBtn" class="btn secondary" type="button">共有データを更新</button>
+              <button id="cloudSaveBtn" class="btn secondary" type="button">入力内容を保存<span class="btn-note">現在の入力内容を保存します</span></button>
+              <button id="cloudReloadBtn" class="btn secondary" type="button">最新データを読み込む<span class="btn-note">別PCで保存された内容を取得します</span></button>
+              <div class="action-menu-gap" aria-hidden="true"></div>
               <button id="clearSlotBtn" class="btn secondary" type="button">選択枠をクリア</button>
               <button id="clearAllBtn" class="btn danger" type="button">全枠クリア</button>
             </div>
@@ -836,7 +851,6 @@
   </main>
 
   <script>
-    const storageKey = "karteMemoSoap.v1";
     const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyPeaL6pDXfFIbFfEHZWugyKCHWiXxJb5YDx5LHn4v-UAXnIGsqaH3XwWWPtW8vsF-F/exec";
     const practitioners = [
       { id: "p1", name: "施術者1" },
@@ -871,7 +885,8 @@
     const todayKey = getTodayKey();
     const PATIENT_LOOKUP_DEBOUNCE_MS = 400;
     let activeDateKey = getInitialActiveDateKey();
-    const state = loadState();
+    clearLegacyStorage();
+    const state = {};
     let selectedPractitioner = "p1";
     let selectedTime = "09:00";
     let messageTimer = null;
@@ -1016,17 +1031,11 @@
       label.textContent = `表示日：${activeDateKey}${note}`;
     }
 
-    function loadState() {
+    function clearLegacyStorage() {
       try {
-        const saved = localStorage.getItem(storageKey);
-        return saved ? JSON.parse(saved) : {};
+        localStorage.removeItem("karteMemoSoap.v1");
       } catch (error) {
-        return {};
       }
-    }
-
-    function persistState() {
-      localStorage.setItem(storageKey, JSON.stringify(state));
     }
 
     function getPractitionerName(practitionerId) {
@@ -1233,7 +1242,6 @@
             updated_at: result.updated_at || "",
             version: result.version || ""
           };
-          persistState();
         }
         setMessage("クラウド保存済み");
         if (cloudSaveKey !== savingSlotKey) markSlotClean(dateKey, practitionerId, time);
@@ -1451,11 +1459,15 @@
         console.log("cloud rows length", Array.isArray(rows) ? rows.length : 0);
 
         if (!Array.isArray(rows) || rows.length === 0) {
+          resetDateSlots(activeDateKey);
+          if (selectedTime) loadSlot(selectedTime);
+          renderTimeline();
+          updateSelectionState();
           if (!isAuto) setMessage("共有データなし：表示日を確認してください");
           return;
         }
 
-        if (!state[activeDateKey]) state[activeDateKey] = {};
+        resetDateSlots(activeDateKey);
 
         let appliedCount = 0;
         let changedCount = 0;
@@ -1556,7 +1568,6 @@
         console.log("cloud changed count", changedCount);
         console.log("cloud skipped editing count", skippedEditingCount);
         if (!isAuto || changedCount > 0) {
-          persistState();
           const currentSlotKey = getCurrentSlotKey();
           const currentSlotProtected = isAuto && (
             dirtySlotKeys.has(currentSlotKey) ||
@@ -1632,6 +1643,16 @@
       });
       if (typeof slot.output !== "string") slot.output = "";
       return slot;
+    }
+
+    function resetDateSlots(dateKey) {
+      state[dateKey] = {};
+      practitioners.forEach((practitioner) => {
+        state[dateKey][practitioner.id] = {};
+        createTimes().forEach((time) => {
+          state[dateKey][practitioner.id][time] = blankSlot();
+        });
+      });
     }
 
     function normalizeSlot(slot) {
@@ -1916,7 +1937,6 @@
           slot.patient.patientName = patientName;
           fields.karteNoInput.value = slot.patient.karteNo;
           updatePatientNameDisplay(patientName);
-          persistState();
           renderTimeline();
           setMessage("患者確認しました");
         } else {
@@ -1924,7 +1944,6 @@
           slot.patient.patientName = "";
           fields.karteNoInput.value = slot.patient.karteNo;
           updatePatientNameDisplay("", { notFound: true });
-          persistState();
           renderTimeline();
           setMessage("該当患者なし");
         }
@@ -2383,7 +2402,6 @@
       slot.p.next = getChoiceValues("pNext");
       slot.p.nextMemo = fields.pNextMemo.value;
       slot.output = fields.soapOutput.value;
-      persistState();
       return true;
     }
 
@@ -2670,7 +2688,6 @@
       cancelCloudSave();
       markSlotDirty(activeDateKey, selectedPractitioner, selectedTime);
       state[activeDateKey][selectedPractitioner][selectedTime] = blankSlot();
-      persistState();
       clearCloudSlot(selectedPractitioner, selectedTime, activeDateKey);
       loadSlot(selectedTime);
       renderTimeline();
@@ -2684,7 +2701,6 @@
         ensureSlot(selectedPractitioner, time);
         state[activeDateKey][selectedPractitioner][time] = blankSlot();
       });
-      persistState();
       if (selectedTime) loadSlot(selectedTime);
       renderTimeline();
       updateSelectionState();
@@ -2783,7 +2799,6 @@
       });
       loadSlot(selectedTime);
       renderTimeline();
-      persistState();
     }
 
     init();
