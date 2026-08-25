@@ -504,11 +504,6 @@
       margin-bottom: 10px;
     }
 
-    .action-menu-gap {
-      grid-column: 1 / -1;
-      height: 12px;
-    }
-
     .btn {
       min-height: 48px;
       border: 1px solid var(--primary-dark);
@@ -519,25 +514,10 @@
       font-weight: 900;
     }
 
-    .btn-note {
-      display: block;
-      margin-top: 3px;
-      font-size: 12px;
-      font-weight: 700;
-      line-height: 1.2;
-      opacity: 0.78;
-    }
-
     .btn.secondary {
       border-color: #7f8d9b;
       background: #fff;
       color: #263440;
-    }
-
-    .btn.danger {
-      border-color: var(--danger);
-      background: var(--danger);
-      color: #fff;
     }
 
     .patient-panel {
@@ -721,11 +701,6 @@
             <div class="actions">
               <button id="generateBtn" class="btn" type="button">SOAP生成</button>
               <button id="copyBtn" class="btn secondary" type="button">コピー</button>
-              <button id="cloudSaveBtn" class="btn secondary" type="button">入力内容を保存<span class="btn-note">現在の入力内容を保存します</span></button>
-              <button id="cloudReloadBtn" class="btn secondary" type="button">最新データを読み込む<span class="btn-note">別PCで保存された内容を取得します</span></button>
-              <div class="action-menu-gap" aria-hidden="true"></div>
-              <button id="clearSlotBtn" class="btn secondary" type="button">選択枠をクリア</button>
-              <button id="clearAllBtn" class="btn danger" type="button">全枠クリア</button>
             </div>
             <div class="patient-panel" aria-label="患者情報">
               <h3 class="patient-title">患者情報</h3>
@@ -768,7 +743,7 @@
                   <div id="sPartDetailChoices" class="part-detail hidden"></div>
                 </div>
                 <div class="field full">
-                  <label>本日の状態</label>
+                  <label>第1位の状態</label>
                   <div id="sConditionChoices" class="choice-group"></div>
                   <div id="sConditionLevelChoices" class="part-detail hidden"></div>
                 </div>
@@ -882,22 +857,20 @@
       "運動痛": "関節・方向・角度",
       "自律神経症状": "詳細"
     };
-    const todayKey = getTodayKey();
+    const CLOUD_SAVE_DEBOUNCE_MS = 800;
     const PATIENT_LOOKUP_DEBOUNCE_MS = 400;
     let activeDateKey = getInitialActiveDateKey();
-    clearLegacyStorage();
     const state = {};
+    const loadedDateKeys = new Set();
+    const dirtySlotKeys = new Set();
+    const slotRevisions = new Map();
     let selectedPractitioner = "p1";
     let selectedTime = "09:00";
     let messageTimer = null;
     let cloudSaveTimer = null;
-    let cloudSaveKey = "";
-    let pendingCloudSaveSections = new Set();
-    let idleRefreshTimer = null;
-    let isSaving = false;
-    let isRefreshing = false;
-    let pendingRefreshOptions = null;
-    const dirtySlotKeys = new Set();
+    let cloudSaveTimerKey = "";
+    let cloudSaveQueue = Promise.resolve(true);
+    let isChangingSelection = false;
     let patientLookupTimer = null;
     let isPatientLookupRunning = false;
     let runningPatientLookupKarteNo = "";
@@ -1007,191 +980,31 @@
       return isBeforeClinicStart() ? getPreviousDateKey(key) : key;
     }
 
-    function setActiveDateKey(dateKey) {
+    async function setActiveDateKey(dateKey) {
       if (dateKey === activeDateKey) {
         updateDateLabel();
         return;
       }
-      if (selectedTime) {
-        saveCurrentSlot({ skipCloud: true });
+      if (isChangingSelection) return;
+      isChangingSelection = true;
+      try {
+        if (!await flushCurrentSlotSave()) return;
+        if (!await loadCloudDate(dateKey)) return;
+        activeDateKey = dateKey;
+        if (selectedTime) loadSlot(selectedTime);
+        renderTimeline();
+        updateSelectionState();
+        updateDateLabel();
+      } finally {
+        isChangingSelection = false;
       }
-      activeDateKey = dateKey;
-      if (selectedTime) {
-        loadSlot(selectedTime);
-      }
-      renderTimeline();
-      updateSelectionState();
-      updateDateLabel();
     }
 
     function updateDateLabel() {
       const label = document.getElementById("todayLabel");
-      const previousKey = getPreviousDateKey(todayKey);
+      const previousKey = getPreviousDateKey(getTodayKey());
       const note = isBeforeClinicStart() && activeDateKey === previousKey ? "（前日分を表示中）" : "";
       label.textContent = `表示日：${activeDateKey}${note}`;
-    }
-
-    function clearLegacyStorage() {
-      try {
-        localStorage.removeItem("karteMemoSoap.v1");
-      } catch (error) {
-      }
-    }
-
-    function getPractitionerName(practitionerId) {
-      const practitioner = practitioners.find((item) => item.id === practitionerId);
-      return practitioner ? practitioner.name : practitionerId;
-    }
-
-    function getSlotKey(dateKey, practitionerId, time) {
-      return `${dateKey}_${practitionerId}_${time}`;
-    }
-
-    function getCurrentSlotKey() {
-      if (!selectedTime) return "";
-      return getSlotKey(activeDateKey, selectedPractitioner, selectedTime);
-    }
-
-    function hasSelectedSlot() {
-      return Boolean(selectedTime);
-    }
-
-    function markSlotDirty(dateKey, practitionerId, time) {
-      dirtySlotKeys.add(getSlotKey(dateKey, practitionerId, time));
-    }
-
-    function markSlotClean(dateKey, practitionerId, time) {
-      dirtySlotKeys.delete(getSlotKey(dateKey, practitionerId, time));
-    }
-
-    function getEventSlotKey(target) {
-      const slotButton = target && target.closest ? target.closest(".slot") : null;
-      if (slotButton && slotButton.dataset.time) {
-        return getSlotKey(activeDateKey, selectedPractitioner, slotButton.dataset.time);
-      }
-      return getCurrentSlotKey();
-    }
-
-    function getEditingSlotKeys(target = document.activeElement) {
-      const keys = new Set();
-      if (!target || !target.closest) return keys;
-      const editable = target.closest("input, textarea, select, .choice, .slot, .pelvic-display, .number-pad button");
-      const appArea = target.closest(".app");
-      if (editable && appArea) keys.add(getEventSlotKey(target));
-      return keys;
-    }
-
-    function mergeRefreshOptions(previous, next) {
-      const merged = Object.assign({}, previous || {}, next || {});
-      const excludedSlotKeys = new Set();
-      [previous, next].forEach((options) => {
-        if (options && options.excludedSlotKeys) {
-          options.excludedSlotKeys.forEach((key) => excludedSlotKeys.add(key));
-        }
-      });
-      merged.excludedSlotKeys = excludedSlotKeys;
-      return merged;
-    }
-
-    function queuePendingRefresh(options) {
-      pendingRefreshOptions = mergeRefreshOptions(pendingRefreshOptions, options);
-      console.log("shared refresh queued", pendingRefreshOptions);
-    }
-
-    function runPendingRefresh() {
-      if (!pendingRefreshOptions || isSaving || isRefreshing || cloudSaveTimer) return;
-      const options = pendingRefreshOptions;
-      pendingRefreshOptions = null;
-      reloadCloudMemos(options);
-    }
-
-    function waitForRefreshToFinish() {
-      if (!isRefreshing) return Promise.resolve();
-      return new Promise((resolve) => {
-        const startedAt = Date.now();
-        const timer = setInterval(() => {
-          if (!isRefreshing || Date.now() - startedAt > 10000) {
-            clearInterval(timer);
-            resolve();
-          }
-        }, 100);
-      });
-    }
-
-    function cancelCloudSave(options = {}) {
-      clearTimeout(cloudSaveTimer);
-      cloudSaveTimer = null;
-      cloudSaveKey = "";
-      if (!options.keepPendingSections) pendingCloudSaveSections.clear();
-    }
-
-    function normalizeCloudSaveSections(sections) {
-      const validSections = new Set(["patient", "s", "additional", "o", "p", "output"]);
-      const list = Array.isArray(sections) ? sections : (sections ? [sections] : []);
-      return [...new Set(list)].filter((section) => validSections.has(section));
-    }
-
-    function scheduleCloudSave(sections = null) {
-      // Cloud saves are manual-only. Keep this function as a no-op so existing local-save paths stay stable.
-    }
-
-    function buildCloudSaveRequest(practitionerId, time, dateKey = activeDateKey) {
-      const slot = ensureSlot(practitionerId, time, dateKey);
-      return {
-        action: "saveMemo",
-        date: dateKey,
-        practitioner_id: practitionerId,
-        practitioner_name: getPractitionerName(practitionerId),
-        time_slot: time,
-        updated_by: navigator.userAgent,
-        is_filled: isFilled(slot),
-        karteNo: slot.patient?.karteNo || "",
-        payload: slot
-      };
-    }
-
-    function buildSectionPayload(slot, section) {
-      if (section === "patient") {
-        return { patient: slot.patient };
-      }
-      if (section === "s") {
-        return { s: slot.s };
-      }
-      if (section === "additional") {
-        return {
-          additionalTreatments: slot.additionalTreatments,
-          additionalDetails: slot.additionalDetails
-        };
-      }
-      if (section === "o") {
-        return {
-          o: slot.o,
-          oNotes: slot.oNotes
-        };
-      }
-      if (section === "p") {
-        return { p: slot.p };
-      }
-      if (section === "output") {
-        return { output: slot.output };
-      }
-      return {};
-    }
-
-    function buildCloudSectionSaveRequest(practitionerId, time, dateKey, section) {
-      const slot = ensureSlot(practitionerId, time, dateKey);
-      return {
-        action: "saveMemoSection",
-        date: dateKey,
-        practitioner_id: practitionerId,
-        practitioner_name: getPractitionerName(practitionerId),
-        time_slot: time,
-        updated_by: navigator.userAgent,
-        section,
-        is_filled: isFilled(slot),
-        karteNo: slot.patient?.karteNo || "",
-        payload: buildSectionPayload(slot, section)
-      };
     }
 
     async function postGas(data) {
@@ -1220,39 +1033,114 @@
       }
     }
 
-    async function saveCloudSlotNow(practitionerId = selectedPractitioner, time = selectedTime, dateKey = activeDateKey, sections = null) {
-      if (!time) return false;
-      const sectionList = normalizeCloudSaveSections(sections);
-      await waitForRefreshToFinish();
-      const savingSlotKey = getSlotKey(dateKey, practitionerId, time);
-      cancelCloudSave();
-      const slot = ensureSlot(practitionerId, time, dateKey);
-      isSaving = true;
-      setMessage("保存中...");
-      try {
-        const requests = sectionList.length
-          ? sectionList.map((section) => buildCloudSectionSaveRequest(practitionerId, time, dateKey, section))
-          : [buildCloudSaveRequest(practitionerId, time, dateKey)];
-        let result = {};
-        for (const request of requests) {
-          result = await postGas(request);
-        }
-        if (result.updated_at || result.version) {
-          slot.cloudMeta = {
-            updated_at: result.updated_at || "",
-            version: result.version || ""
-          };
-        }
-        setMessage("クラウド保存済み");
-        if (cloudSaveKey !== savingSlotKey) markSlotClean(dateKey, practitionerId, time);
-        return true;
-      } catch (error) {
-        setMessage(error.message || "未同期：通信失敗");
+    function getPractitionerName(practitionerId) {
+      const practitioner = practitioners.find((item) => item.id === practitionerId);
+      return practitioner ? practitioner.name : practitionerId;
+    }
+
+    function getSlotKey(dateKey, practitionerId, time) {
+      return `${dateKey}_${practitionerId}_${time}`;
+    }
+
+    function markSlotDirty(dateKey, practitionerId, time) {
+      const slotKey = getSlotKey(dateKey, practitionerId, time);
+      dirtySlotKeys.add(slotKey);
+      slotRevisions.set(slotKey, (slotRevisions.get(slotKey) || 0) + 1);
+    }
+
+    function cloneSlotForCloud(slot) {
+      return JSON.parse(JSON.stringify(slot));
+    }
+
+    function cancelCloudSaveTimer() {
+      clearTimeout(cloudSaveTimer);
+      cloudSaveTimer = null;
+      cloudSaveTimerKey = "";
+    }
+
+    function scheduleCloudSave(practitionerId = selectedPractitioner, time = selectedTime, dateKey = activeDateKey) {
+      if (!time) return;
+      cancelCloudSaveTimer();
+      cloudSaveTimerKey = getSlotKey(dateKey, practitionerId, time);
+      cloudSaveTimer = setTimeout(() => {
+        cloudSaveTimer = null;
+        cloudSaveTimerKey = "";
+        saveCloudSlotNow(practitionerId, time, dateKey);
+      }, CLOUD_SAVE_DEBOUNCE_MS);
+    }
+
+    function buildCloudSaveRequest(practitionerId, time, dateKey, payload) {
+      return {
+        action: "saveMemo",
+        date: dateKey,
+        practitioner_id: practitionerId,
+        practitioner_name: getPractitionerName(practitionerId),
+        time_slot: time,
+        updated_by: navigator.userAgent,
+        is_filled: isFilled(payload),
+        payload
+      };
+    }
+
+    async function saveCloudSlotNow(practitionerId = selectedPractitioner, time = selectedTime, dateKey = activeDateKey) {
+      if (!time) return true;
+      const slotKey = getSlotKey(dateKey, practitionerId, time);
+      if (cloudSaveTimerKey === slotKey) cancelCloudSaveTimer();
+      if (!dirtySlotKeys.has(slotKey)) return true;
+      if (!loadedDateKeys.has(dateKey)) {
+        setMessage("カルテ読込未完了のため保存できません");
         return false;
-      } finally {
-        isSaving = false;
-        runPendingRefresh();
       }
+
+      if (dateKey === activeDateKey && practitionerId === selectedPractitioner && time === selectedTime) {
+        saveCurrentSlot();
+      }
+      const payload = cloneSlotForCloud(ensureSlot(practitionerId, time, dateKey));
+      if (!isFilled(payload)) {
+        dirtySlotKeys.delete(slotKey);
+        return true;
+      }
+
+      const revision = slotRevisions.get(slotKey) || 0;
+      const saveTask = async () => {
+        setMessage("保存中...");
+        try {
+          await postGas(buildCloudSaveRequest(practitionerId, time, dateKey, payload));
+          if ((slotRevisions.get(slotKey) || 0) === revision) {
+            dirtySlotKeys.delete(slotKey);
+          }
+          setMessage("保存しました");
+          return true;
+        } catch (error) {
+          setMessage(`保存失敗：${error.message}`);
+          return false;
+        }
+      };
+      cloudSaveQueue = cloudSaveQueue.then(saveTask, saveTask);
+      return cloudSaveQueue;
+    }
+
+    async function flushCurrentSlotSave() {
+      cancelCloudSaveTimer();
+      if (!selectedTime) return true;
+      saveCurrentSlot();
+      const slotKey = getSlotKey(activeDateKey, selectedPractitioner, selectedTime);
+      if (dirtySlotKeys.has(slotKey)) {
+        return saveCloudSlotNow(selectedPractitioner, selectedTime, activeDateKey);
+      }
+      await cloudSaveQueue;
+      return true;
+    }
+
+    function savePendingSlotOnPageHide() {
+      if (!selectedTime || !loadedDateKeys.has(activeDateKey) || typeof navigator.sendBeacon !== "function") return;
+      saveCurrentSlot();
+      const slotKey = getSlotKey(activeDateKey, selectedPractitioner, selectedTime);
+      if (!dirtySlotKeys.has(slotKey)) return;
+      const payload = cloneSlotForCloud(ensureSlot(selectedPractitioner, selectedTime, activeDateKey));
+      if (!isFilled(payload)) return;
+      const body = JSON.stringify(buildCloudSaveRequest(selectedPractitioner, selectedTime, activeDateKey, payload));
+      navigator.sendBeacon(GAS_WEB_APP_URL, new Blob([body], { type: "text/plain;charset=UTF-8" }));
     }
 
     function getCloudRows(result) {
@@ -1273,348 +1161,65 @@
 
     function parseCloudPayload(payload) {
       if (!payload) return null;
-
-      let value = payload;
-      for (let index = 0; index < 2 && typeof value === "string"; index += 1) {
-        if (!value.trim()) return null;
-        try {
-          value = JSON.parse(value);
-        } catch (error) {
-          console.error("payload JSON parse error", error, value);
-          return null;
-        }
+      if (typeof payload === "object" && !Array.isArray(payload)) return payload;
+      if (typeof payload !== "string" || !payload.trim()) return null;
+      try {
+        const parsed = JSON.parse(payload);
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+      } catch (error) {
+        return null;
       }
-
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        return value;
-      }
-
-      return null;
-    }
-
-    function getRowPayload(row) {
-      const candidates = [
-        getCloudRowValue(row, ["payload", "payload_json", "payloadJson"], 11),
-        getCloudRowValue(row, ["payload_json", "payloadJson"], 11),
-        getCloudRowValue(row, ["payload"], 11)
-      ];
-      let fallback = null;
-
-      for (const candidate of candidates) {
-        const payload = parseCloudPayload(candidate);
-        if (!payload) continue;
-        if (hasCloudPayloadData(payload)) return payload;
-        if (!fallback) fallback = payload;
-      }
-
-      return fallback;
-    }
-
-    function getCloudPayload(row) {
-      return getRowPayload(row);
-    }
-
-    function hasCloudValue(value) {
-      if (value === null || value === undefined || value === false) return false;
-      if (typeof value === "string") {
-        const text = value.trim();
-        return Boolean(text && text !== "なし" && text !== "未選択");
-      }
-      if (typeof value === "number") return Number.isFinite(value);
-      if (Array.isArray(value)) return value.some((item) => hasCloudValue(item));
-      if (typeof value === "object") return Object.values(value).some((item) => hasCloudValue(item));
-      return Boolean(value);
-    }
-
-    function hasCloudPayloadData(payload) {
-      if (!payload || typeof payload !== "object") return false;
-
-      return Boolean(
-        hasCloudValue(payload.selectedParts) ||
-        hasCloudValue(payload.subjectiveParts) ||
-        hasCloudValue(payload.objectiveFindings) ||
-        hasCloudValue(payload.assessment) ||
-        hasCloudValue(payload.plan) ||
-        hasCloudValue(payload.memo) ||
-        hasCloudValue(payload.soap) ||
-        hasCloudValue(payload.generatedMemo) ||
-        hasCloudValue(payload.painLevel) ||
-        hasCloudValue(payload.treatmentParts) ||
-        hasCloudValue(payload.burden) ||
-        hasCloudValue(payload.eventMemo) ||
-        hasCloudValue(payload.patient) ||
-        payload.output && String(payload.output).trim() ||
-        payload.s && (
-          hasCloudValue(payload.s.part) ||
-          hasCloudValue(payload.s.partDetails) ||
-          hasCloudValue(payload.s.fingers) ||
-          hasCloudValue(payload.s.fingerDetails) ||
-          hasCloudValue(payload.s.condition) ||
-          hasCloudValue(payload.s.conditionLevels) ||
-          hasCloudValue(payload.s.change) ||
-          hasCloudValue(payload.s.request) ||
-          hasCloudValue(payload.s.memo)
-        ) ||
-        hasCloudValue(payload.additionalTreatments) ||
-        hasCloudValue(payload.additionalDetails) ||
-        hasCloudValue(payload.o) ||
-        hasCloudValue(payload.oNotes) ||
-        payload.p && (
-          hasCloudValue(payload.p.treatment) ||
-          hasCloudValue(payload.p.treatmentMemo) ||
-          hasCloudValue(payload.p.electric) ||
-          hasCloudValue(payload.p.electricMemo) ||
-          hasCloudValue(payload.p.guidance) ||
-          hasCloudValue(payload.p.guidanceMemo) ||
-          hasCloudValue(payload.p.next) ||
-          hasCloudValue(payload.p.nextMemo)
-        )
-      );
-    }
-
-    function normalizeCloudBoolean(value) {
-      if (value === true || value === 1) return true;
-      if (typeof value === "string") {
-        const text = value.trim().toLowerCase();
-        return text === "true" || text === "1";
-      }
-      return false;
-    }
-
-    function isCloudFilled(value) {
-      return normalizeCloudBoolean(value);
     }
 
     function normalizeCloudTimeSlot(value) {
       if (value === null || value === undefined || value === "") return "";
-
       if (typeof value === "number" && Number.isFinite(value)) {
         const totalMinutes = Math.round(value * 24 * 60);
         const hour = String(Math.floor(totalMinutes / 60) % 24).padStart(2, "0");
         const minute = String(totalMinutes % 60).padStart(2, "0");
         return `${hour}:${minute}`;
       }
-
-      const text = String(value).trim();
-      if (/(T|Z|GMT|UTC|[+-]\d{2}:?\d{2}$)/i.test(text)) {
-        const parsedDateTime = new Date(text);
-        if (!Number.isNaN(parsedDateTime.getTime())) {
-          return `${String(parsedDateTime.getHours()).padStart(2, "0")}:${String(parsedDateTime.getMinutes()).padStart(2, "0")}`;
-        }
-      }
-
-      const timeMatch = text.match(/\b(\d{1,2}):(\d{2})\b/);
-      if (timeMatch) {
-        return `${timeMatch[1].padStart(2, "0")}:${timeMatch[2]}`;
-      }
-
-      const parsed = new Date(text);
-      if (!Number.isNaN(parsed.getTime())) {
-        return `${String(parsed.getHours()).padStart(2, "0")}:${String(parsed.getMinutes()).padStart(2, "0")}`;
-      }
-
-      return text;
+      const match = String(value).trim().match(/\b(\d{1,2}):(\d{2})\b/);
+      return match ? `${match[1].padStart(2, "0")}:${match[2]}` : String(value).trim();
     }
 
-    function shouldSkipCloudApply(practitionerId, timeSlot, options) {
-      if (!practitionerId || !timeSlot) return false;
-      const slotKey = getSlotKey(activeDateKey, practitionerId, timeSlot);
-      if (dirtySlotKeys.has(slotKey)) return true;
-      return Boolean(options && options.excludedSlotKeys && options.excludedSlotKeys.has(slotKey));
+    function initializeDateSlots(dateKey) {
+      if (!state[dateKey]) state[dateKey] = {};
+      practitioners.forEach((practitioner) => {
+        if (!state[dateKey][practitioner.id]) state[dateKey][practitioner.id] = {};
+        createTimes().forEach((time) => ensureSlot(practitioner.id, time, dateKey));
+      });
     }
 
-    function serializeSlotForCompare(slot) {
+    async function loadCloudDate(dateKey) {
+      setMessage("カルテデータを読み込み中...");
       try {
-        return JSON.stringify(slot || null);
-      } catch (error) {
-        return "";
-      }
-    }
-
-    async function reloadCloudMemos(options = {}) {
-      const mode = options.mode || "manual";
-      const isAuto = mode !== "manual";
-      if (isRefreshing) {
-        queuePendingRefresh(options);
-        return false;
-      }
-      if (isAuto && (isSaving || cloudSaveTimer)) {
-        queuePendingRefresh(options);
-        return false;
-      }
-      if (!isAuto) cancelCloudSave();
-
-      isRefreshing = true;
-      if (!isAuto) setMessage("共有データを更新中...");
-      try {
-        console.log("shared refresh activeDateKey", activeDateKey);
-        console.log("shared refresh mode", mode);
-        const result = await postGas({
-          action: "loadMemos",
-          date: activeDateKey
+        const result = await postGas({ action: "loadMemos", date: dateKey });
+        const nextDateState = {};
+        practitioners.forEach((practitioner) => {
+          nextDateState[practitioner.id] = {};
         });
-        console.log("shared refresh result", result);
-        const rows = getCloudRows(result);
-        console.log("shared refresh rows", rows);
-        console.log("cloud rows length", Array.isArray(rows) ? rows.length : 0);
-
-        if (!Array.isArray(rows) || rows.length === 0) {
-          resetDateSlots(activeDateKey);
-          if (selectedTime) loadSlot(selectedTime);
-          renderTimeline();
-          updateSelectionState();
-          if (!isAuto) setMessage("共有データなし：表示日を確認してください");
-          return;
-        }
-
-        resetDateSlots(activeDateKey);
-
-        let appliedCount = 0;
-        let changedCount = 0;
-        let skippedEditingCount = 0;
-        rows.forEach((row) => {
-          console.log("cloud row", row);
-          const practitionerId = getCloudRowValue(row, ["practitioner_id", "practitionerId"], 2);
-          const rawTime = getCloudRowValue(row, ["time_slot", "timeSlot", "time"], 4);
-          const timeSlot = normalizeCloudTimeSlot(rawTime);
-          const isDeleted = normalizeCloudBoolean(getCloudRowValue(row, ["is_deleted", "isDeleted"], 9));
-          const payload = getRowPayload(row);
-          const payloadHasData = hasCloudPayloadData(payload);
-          const filledByRow = normalizeCloudBoolean(getCloudRowValue(row, ["is_filled", "isFilled"], 10));
-          console.log("cloud payload", payload);
-          console.log("cloud has data", payloadHasData);
-          console.log("cloud target", activeDateKey, practitionerId, timeSlot);
-          console.log("shared refresh row detail", {
-            record_key: getCloudRowValue(row, ["record_key", "recordKey"], 0),
-            date: getCloudRowValue(row, ["date"], 1),
-            practitioner_id: practitionerId,
-            time_slot: timeSlot,
-            raw_time_slot: rawTime,
-            is_deleted: isDeleted,
-            is_filled: getCloudRowValue(row, ["is_filled", "isFilled"], 10),
-            payload,
-            hasCloudPayloadData: payloadHasData
-          });
-
-          if (isDeleted) {
-            if (shouldSkipCloudApply(practitionerId, timeSlot, options)) {
-              skippedEditingCount += 1;
-              console.log("shared refresh skipped editing deleted row", activeDateKey, practitionerId, timeSlot);
-              return;
-            }
-            if (practitionerId && timeSlot && practitioners.some((item) => item.id === practitionerId)) {
-              if (!state[activeDateKey]) state[activeDateKey] = {};
-              if (!state[activeDateKey][practitionerId]) state[activeDateKey][practitionerId] = {};
-              const before = serializeSlotForCompare(state[activeDateKey][practitionerId][timeSlot]);
-              state[activeDateKey][practitionerId][timeSlot] = blankSlot();
-
-              const updatedAt = getCloudRowValue(row, ["updated_at", "updatedAt"], 6);
-              const version = getCloudRowValue(row, ["version"], 8);
-              if (updatedAt || version) {
-                state[activeDateKey][practitionerId][timeSlot].cloudMeta = {
-                  updated_at: updatedAt || "",
-                  version: version || ""
-                };
-              }
-
-              const normalizedSlot = ensureSlot(practitionerId, timeSlot, activeDateKey);
-              const after = serializeSlotForCompare(normalizedSlot);
-              appliedCount += 1;
-              if (before !== after) changedCount += 1;
-              console.log("shared refresh deleted applied", activeDateKey, practitionerId, timeSlot);
-              console.log("cloud applied count", appliedCount);
-            } else {
-              console.warn("shared refresh skipped deleted row", row);
-            }
-            return;
-          }
-
-          if (!practitionerId || !timeSlot || !payload) {
-            console.warn("shared refresh skipped", row);
-            return;
-          }
-
-          if (shouldSkipCloudApply(practitionerId, timeSlot, options)) {
-            skippedEditingCount += 1;
-            console.log("shared refresh skipped editing row", activeDateKey, practitionerId, timeSlot);
-            return;
-          }
-
-          if (!practitioners.some((item) => item.id === practitionerId)) {
-            console.warn("unknown practitioner ID", practitionerId);
-            return;
-          }
-
-          if (!state[activeDateKey][practitionerId]) state[activeDateKey][practitionerId] = {};
-          const before = serializeSlotForCompare(state[activeDateKey][practitionerId][timeSlot]);
-          state[activeDateKey][practitionerId][timeSlot] = payload;
-          const updatedAt = getCloudRowValue(row, ["updated_at", "updatedAt"], 6);
-          const version = getCloudRowValue(row, ["version"], 8);
-          if (updatedAt || version) {
-            state[activeDateKey][practitionerId][timeSlot].cloudMeta = {
-              updated_at: updatedAt || "",
-              version: version || ""
-            };
-          }
-          const normalizedSlot = ensureSlot(practitionerId, timeSlot, activeDateKey);
-          const after = serializeSlotForCompare(normalizedSlot);
-          const filledAfterApply = isFilled(normalizedSlot);
-          console.log("蜿肴丐蠕・isFilled", activeDateKey, practitionerId, timeSlot, filledAfterApply, normalizedSlot);
-          appliedCount += 1;
-          if (before !== after) changedCount += 1;
-          console.log("cloud applied count", appliedCount);
-        });
-        console.log("cloud applied count", appliedCount);
-        console.log("cloud changed count", changedCount);
-        console.log("cloud skipped editing count", skippedEditingCount);
-        if (!isAuto || changedCount > 0) {
-          const currentSlotKey = getCurrentSlotKey();
-          const currentSlotProtected = isAuto && (
-            dirtySlotKeys.has(currentSlotKey) ||
-            options.excludedSlotKeys && options.excludedSlotKeys.has(currentSlotKey)
+        getCloudRows(result).forEach((row) => {
+          const practitionerId = String(getCloudRowValue(row, ["practitioner_id", "practitionerId"], 2) || "");
+          const time = normalizeCloudTimeSlot(getCloudRowValue(row, ["time_slot", "timeSlot", "time"], 4));
+          const payload = parseCloudPayload(
+            getCloudRowValue(row, ["payload", "payload_json", "payloadJson"], 11)
           );
-          if (!currentSlotProtected && selectedTime) {
-            loadSlot(selectedTime);
-          }
-          renderTimeline();
-          updateSelectionState();
-        }
-        if (isAuto && changedCount === 0) {
-          console.log("共有更新 auto no visible changes");
-        } else if (appliedCount === 0) {
-          setMessage(skippedEditingCount > 0 ? "編集中の枠を除いて共有データを確認しました" : "共有データは取得しましたが、画面に反映できるデータがありません");
-        } else {
-          setMessage(isAuto ? `共有データを反映しました：${changedCount || appliedCount}件` : `共有データを反映しました：${appliedCount}件`);
-        }
+          if (!nextDateState[practitionerId] || !createTimes().includes(time) || !payload) return;
+          nextDateState[practitionerId][time] = payload;
+        });
+        state[dateKey] = nextDateState;
+        initializeDateSlots(dateKey);
+        loadedDateKeys.add(dateKey);
+        const prefix = `${dateKey}_`;
+        [...dirtySlotKeys].forEach((slotKey) => {
+          if (slotKey.startsWith(prefix)) dirtySlotKeys.delete(slotKey);
+        });
+        setMessage("カルテデータを読み込みました");
         return true;
       } catch (error) {
-        console.error("共有データ更新エラー", error);
-        setMessage(`共有データ更新失敗：${error.message}`);
+        setMessage(`読込失敗：${error.message}`);
         return false;
-      } finally {
-        isRefreshing = false;
-        runPendingRefresh();
-      }
-    }
-
-    async function clearCloudSlot(practitionerId, time, dateKey = activeDateKey) {
-      await waitForRefreshToFinish();
-      isSaving = true;
-      try {
-        await postGas({
-          action: "clearMemo",
-          date: dateKey,
-          practitioner_id: practitionerId,
-          practitioner_name: getPractitionerName(practitionerId),
-          time_slot: time,
-          updated_by: navigator.userAgent
-        });
-        markSlotClean(dateKey, practitionerId, time);
-      } catch (error) {
-        setMessage("未同期：通信失敗");
-      } finally {
-        isSaving = false;
-        runPendingRefresh();
       }
     }
 
@@ -1643,16 +1248,6 @@
       });
       if (typeof slot.output !== "string") slot.output = "";
       return slot;
-    }
-
-    function resetDateSlots(dateKey) {
-      state[dateKey] = {};
-      practitioners.forEach((practitioner) => {
-        state[dateKey][practitioner.id] = {};
-        createTimes().forEach((time) => {
-          state[dateKey][practitioner.id][time] = blankSlot();
-        });
-      });
     }
 
     function normalizeSlot(slot) {
@@ -1798,34 +1393,6 @@
       }, 2400);
     }
 
-    function createAutoRefreshOptions(mode, target = document.activeElement) {
-      const excludedSlotKeys = getEditingSlotKeys(target);
-      if (mode === "interaction") {
-        excludedSlotKeys.add(getEventSlotKey(target));
-        excludedSlotKeys.add(getCurrentSlotKey());
-      }
-      return {
-        mode,
-        excludedSlotKeys
-      };
-    }
-
-    function requestAutoRefresh(mode, target = document.activeElement) {
-      // Shared refresh is manual-only.
-      return false;
-    }
-
-    function startIdleRefreshTimer() {
-      // Shared refresh is manual-only. The timer is intentionally disabled.
-      stopIdleRefreshTimer();
-    }
-
-    function stopIdleRefreshTimer() {
-      if (!idleRefreshTimer) return;
-      clearInterval(idleRefreshTimer);
-      idleRefreshTimer = null;
-    }
-
     function normalizeKarteNo(value) {
       return String(value || "").replace(/\D/g, "").slice(0, 4);
     }
@@ -1916,7 +1483,10 @@
         return;
       }
 
-      const slot = ensureSlot(selectedPractitioner, selectedTime);
+      const lookupDateKey = activeDateKey;
+      const lookupPractitionerId = selectedPractitioner;
+      const lookupTime = selectedTime;
+      const slot = ensureSlot(lookupPractitionerId, lookupTime, lookupDateKey);
       slot.patient.karteNo = karteNo;
       isPatientLookupRunning = true;
       runningPatientLookupKarteNo = karteNo;
@@ -1947,6 +1517,8 @@
           renderTimeline();
           setMessage("該当患者なし");
         }
+        markSlotDirty(lookupDateKey, lookupPractitionerId, lookupTime);
+        saveCloudSlotNow(lookupPractitionerId, lookupTime, lookupDateKey);
         lastAutoLookedUpKarteNo = karteNo;
       } catch (error) {
         console.error("患者確認エラー", error);
@@ -2040,7 +1612,7 @@
           note.dataset.findingNote = name;
           note.placeholder = findingNoteLabels[name] + "の記録";
           note.addEventListener("input", () => {
-            saveCurrentSection("o");
+            saveCurrentSection("o", { debounce: true });
             renderTimeline();
           });
           row.appendChild(note);
@@ -2356,7 +1928,14 @@
     }
 
     function saveCurrentSection(section, options = {}) {
-      return saveCurrentSlot({ skipCloud: true });
+      if (!saveCurrentSlot()) return false;
+      markSlotDirty(activeDateKey, selectedPractitioner, selectedTime);
+      if (options.debounce) {
+        scheduleCloudSave();
+      } else {
+        saveCloudSlotNow();
+      }
+      return true;
     }
 
     function saveCurrentSlot(options = {}) {
@@ -2365,7 +1944,6 @@
         return false;
       }
       const slot = ensureSlot(selectedPractitioner, selectedTime);
-      markSlotDirty(activeDateKey, selectedPractitioner, selectedTime);
       slot.s.part = getOrderedSPartValues();
       slot.s.partDetails = getPartDetails();
       slot.s.fingerDetails = getFingerDetails();
@@ -2444,29 +2022,35 @@
       updateSelectionState();
     }
 
-    function selectTime(time) {
-      const previousTime = selectedTime;
-      if (previousTime) {
-        saveCurrentSlot({ skipCloud: true });
+    async function selectTime(time) {
+      if (isChangingSelection) return;
+      isChangingSelection = true;
+      try {
+        if (!await flushCurrentSlotSave()) return;
+        selectedTime = time;
+        loadSlot(time);
+        renderTimeline();
+        updateSelectionState();
+      } finally {
+        isChangingSelection = false;
       }
-      selectedTime = time;
-      loadSlot(time);
-      renderTimeline();
-      updateSelectionState();
     }
 
-    function selectPractitioner(practitionerId) {
+    async function selectPractitioner(practitionerId) {
       if (practitionerId === selectedPractitioner) return;
-      const previousTime = selectedTime;
-      if (previousTime) {
-        saveCurrentSlot({ skipCloud: true });
+      if (isChangingSelection) return;
+      isChangingSelection = true;
+      try {
+        if (!await flushCurrentSlotSave()) return;
+        selectedPractitioner = practitionerId;
+        selectedTime = "09:00";
+        loadSlot(selectedTime);
+        renderPractitioners();
+        renderTimeline();
+        updateSelectionState();
+      } finally {
+        isChangingSelection = false;
       }
-      selectedPractitioner = practitionerId;
-      selectedTime = "09:00";
-      loadSlot(selectedTime);
-      renderPractitioners();
-      renderTimeline();
-      updateSelectionState();
     }
 
     function updateSelectedLabel() {
@@ -2487,7 +2071,7 @@
         "P：" + buildPlan(slot)
       ].join("\n\n");
       fields.soapOutput.value = limitMemoLength(soap);
-      saveCurrentSlot({ skipCloud: true });
+      saveCurrentSection("output");
       updateCounter();
       renderTimeline();
       setMessage("SOAPを生成しました");
@@ -2678,35 +2262,6 @@
       }
     }
 
-    function clearSelectedSlot() {
-      if (!selectedTime) {
-        setMessage("時間枠を選択してください");
-        updateSelectionState();
-        return;
-      }
-      if (!confirm("本当にクリアして良いですか？")) return;
-      cancelCloudSave();
-      markSlotDirty(activeDateKey, selectedPractitioner, selectedTime);
-      state[activeDateKey][selectedPractitioner][selectedTime] = blankSlot();
-      clearCloudSlot(selectedPractitioner, selectedTime, activeDateKey);
-      loadSlot(selectedTime);
-      renderTimeline();
-      setMessage("選択枠をクリアしました");
-    }
-
-    function clearAllSlots() {
-      if (!confirm("本当にクリアして良いですか？")) return;
-      cancelCloudSave();
-      createTimes().forEach((time) => {
-        ensureSlot(selectedPractitioner, time);
-        state[activeDateKey][selectedPractitioner][time] = blankSlot();
-      });
-      if (selectedTime) loadSlot(selectedTime);
-      renderTimeline();
-      updateSelectionState();
-      setMessage("全枠をクリアしました");
-    }
-
     function updateCounter() {
       document.getElementById("counter").textContent = fields.soapOutput.value.length + "字";
     }
@@ -2719,13 +2274,19 @@
       return Boolean(target.closest("button, input, textarea, select, label, .choice, .slot, .practitioner, .patient-name, .pelvic-display, .number-pad, a"));
     }
 
-    function deselectCurrentSlot() {
+    async function deselectCurrentSlot() {
       if (!selectedTime) return;
-      saveCurrentSlot({ skipCloud: true });
+      if (isChangingSelection) return;
+      isChangingSelection = true;
+      if (!await flushCurrentSlotSave()) {
+        isChangingSelection = false;
+        return;
+      }
       selectedTime = "";
       renderTimeline();
       updateSelectionState();
       setMessage("時間枠の選択を解除しました");
+      isChangingSelection = false;
     }
 
     function handleBlankAreaClick(event) {
@@ -2741,7 +2302,7 @@
       Object.values(fields).forEach((field) => {
         field.addEventListener("input", () => {
           if (field === fields.karteNoInput) handleKarteNoInput();
-          saveCurrentSection(getFieldSection(field));
+          saveCurrentSection(getFieldSection(field), { debounce: true });
           if (field === fields.karteNoInput) schedulePatientLookupIfReady();
           updateCounter();
           renderTimeline();
@@ -2757,24 +2318,12 @@
       document.getElementById("copyBtn").addEventListener("click", copySoap);
       fields.karteNoInput.addEventListener("keydown", handleKarteNoKeydown);
       document.getElementById("patientLookupBtn").addEventListener("click", () => lookupPatient({ force: true, source: "button" }));
-      document.getElementById("cloudSaveBtn").addEventListener("click", () => {
-        if (!selectedTime) {
-          setMessage("時間枠を選択してください");
-          updateSelectionState();
-          return;
-        }
-        saveCurrentSlot({ skipCloud: true });
-        saveCloudSlotNow(selectedPractitioner, selectedTime);
-      });
-      document.getElementById("cloudReloadBtn").addEventListener("click", () => reloadCloudMemos());
       document.getElementById("prevDateBtn").addEventListener("click", () => {
         setActiveDateKey(getPreviousDateKey(activeDateKey));
       });
       document.getElementById("todayDateBtn").addEventListener("click", () => {
-        setActiveDateKey(todayKey);
+        setActiveDateKey(getTodayKey());
       });
-      document.getElementById("clearSlotBtn").addEventListener("click", clearSelectedSlot);
-      document.getElementById("clearAllBtn").addEventListener("click", clearAllSlots);
       fields.pelvicPrev.addEventListener("click", () => {
         pelvicInputTarget = "prev";
         updatePelvicDisplays();
@@ -2784,9 +2333,10 @@
         updatePelvicDisplays();
       });
       document.querySelector(".app").addEventListener("click", handleBlankAreaClick);
+      window.addEventListener("pagehide", savePendingSlotOnPageHide);
     }
 
-    function init() {
+    async function init() {
       updateDateLabel();
       renderChoiceGroups();
       renderFindings();
@@ -2794,9 +2344,8 @@
       renderPelvicNumberPad();
       renderPractitioners();
       bindInputs();
-      practitioners.forEach((item) => {
-        createTimes().forEach((time) => ensureSlot(item.id, time));
-      });
+      const loaded = await loadCloudDate(activeDateKey);
+      if (!loaded) initializeDateSlots(activeDateKey);
       loadSlot(selectedTime);
       renderTimeline();
     }
