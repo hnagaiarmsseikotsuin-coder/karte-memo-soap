@@ -1175,12 +1175,32 @@
       if (value === null || value === undefined || value === "") return "";
       if (typeof value === "number" && Number.isFinite(value)) {
         const totalMinutes = Math.round(value * 24 * 60);
-        const hour = String(Math.floor(totalMinutes / 60) % 24).padStart(2, "0");
-        const minute = String(totalMinutes % 60).padStart(2, "0");
+        const normalizedMinutes = ((totalMinutes % 1440) + 1440) % 1440;
+        const hour = String(Math.floor(normalizedMinutes / 60)).padStart(2, "0");
+        const minute = String(normalizedMinutes % 60).padStart(2, "0");
         return `${hour}:${minute}`;
       }
-      const match = String(value).trim().match(/\b(\d{1,2}):(\d{2})\b/);
-      return match ? `${match[1].padStart(2, "0")}:${match[2]}` : String(value).trim();
+      const text = String(value).trim();
+      if (/^\d{4}-\d{2}-\d{2}T/.test(text)) {
+        const date = new Date(text);
+        if (!Number.isNaN(date.getTime())) {
+          const parts = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Asia/Tokyo",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false
+          }).formatToParts(date);
+          const hour = parts.find((part) => part.type === "hour")?.value;
+          const minute = parts.find((part) => part.type === "minute")?.value;
+          if (hour && minute) return `${hour === "24" ? "00" : hour}:${minute}`;
+        }
+      }
+      const match = text.match(/(\d{1,2}):(\d{2})/);
+      if (!match) return "";
+      const hour = Number(match[1]);
+      const minute = Number(match[2]);
+      if (hour > 23 || minute > 59) return "";
+      return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
     }
 
     function initializeDateSlots(dateKey) {
@@ -1199,15 +1219,23 @@
         practitioners.forEach((practitioner) => {
           nextDateState[practitioner.id] = {};
         });
-        getCloudRows(result).forEach((row) => {
+        const cloudRows = getCloudRows(result);
+        let hasInvalidRow = false;
+        cloudRows.forEach((row) => {
           const practitionerId = String(getCloudRowValue(row, ["practitioner_id", "practitionerId"], 2) || "");
           const time = normalizeCloudTimeSlot(getCloudRowValue(row, ["time_slot", "timeSlot", "time"], 4));
           const payload = parseCloudPayload(
             getCloudRowValue(row, ["payload", "payload_json", "payloadJson"], 11)
           );
-          if (!nextDateState[practitionerId] || !createTimes().includes(time) || !payload) return;
+          if (!nextDateState[practitionerId] || !createTimes().includes(time) || !payload) {
+            hasInvalidRow = true;
+            return;
+          }
           nextDateState[practitionerId][time] = payload;
         });
+        if (hasInvalidRow) {
+          throw new Error("読み込めないカルテデータがあるため、画面を更新しませんでした");
+        }
         state[dateKey] = nextDateState;
         initializeDateSlots(dateKey);
         loadedDateKeys.add(dateKey);
